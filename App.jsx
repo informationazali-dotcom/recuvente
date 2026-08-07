@@ -320,12 +320,89 @@ export default function App() {
   }
 
   return (
-    <div style={{ background: "#FAFAF7", minHeight: "100vh", fontFamily: "'IBM Plex Sans', sans-serif", color: "#16231F", paddingBottom: 76 }}>
+    <div className="rv-app" style={{ background: "#FAFAF7", minHeight: "100vh", fontFamily: "'IBM Plex Sans', sans-serif", color: "#16231F", paddingBottom: 76 }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');
         * { box-sizing: border-box; }
         button { font-family: inherit; cursor: pointer; }
+        .rv-sidebar { display: none; }
+        .rv-content-wrap { }
+        @media (min-width: 900px) {
+          .rv-app { padding-bottom: 0 !important; }
+          .rv-bottomnav { display: none !important; }
+          .rv-fab { display: none !important; }
+          .rv-sidebar {
+            display: flex;
+            position: fixed;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            width: 220px;
+            background: #16231F;
+            flex-direction: column;
+            padding: 24px 14px;
+            z-index: 30;
+          }
+          .rv-content-wrap {
+            margin-left: 220px;
+            max-width: 720px;
+          }
+        }
       `}</style>
+
+      <div className="rv-sidebar">
+        <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 32, padding: "0 8px" }}>
+          <div style={{ width: 26, height: 26, borderRadius: 7, background: "rgba(255,255,255,0.1)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <svg width="15" height="15" viewBox="0 0 100 100">
+              <polyline points="15,62 40,42 55,56 85,28" stroke="#e8920a" strokeWidth="11" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </div>
+          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 17, color: "white" }}>
+            RECU<span style={{ color: "#e8920a" }}>VENTE</span>
+          </div>
+        </div>
+        {[
+          { key: "dashboard", label: "Commandes", icon: Package },
+          { key: "clients", label: "Clients", icon: Users },
+          { key: "livreurs", label: "Livreurs", icon: Truck },
+        ].map((t) => {
+          const Icon = t.icon;
+          const active = view === t.key;
+          return (
+            <button
+              key={t.key}
+              onClick={() => setView(t.key)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 11,
+                padding: "11px 12px",
+                borderRadius: 9,
+                border: "none",
+                background: active ? "rgba(255,255,255,0.1)" : "transparent",
+                color: active ? "white" : "rgba(255,255,255,0.6)",
+                fontSize: 14,
+                fontWeight: active ? 600 : 500,
+                textAlign: "left",
+                marginBottom: 3,
+              }}
+            >
+              <Icon size={18} />
+              {t.label}
+            </button>
+          );
+        })}
+        <div style={{ marginTop: "auto", padding: "0 12px" }}>
+          <button
+            onClick={() => (view === "livreurs" ? setShowAddLivreur(true) : setShowAdd(true))}
+            style={{ width: "100%", padding: "10px 0", borderRadius: 9, border: "none", background: "#e8920a", color: "#16231F", fontWeight: 700, fontSize: 13.5, display: view === "clients" ? "none" : "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+          >
+            <Plus size={16} /> Ajouter
+          </button>
+        </div>
+      </div>
+
+      <div className="rv-content-wrap">
 
       {view === "dashboard" && (
       <>
@@ -612,7 +689,10 @@ export default function App() {
         <LivreursView livreurs={livreursStats} onDelete={deleteLivreur} />
       )}
 
+      </div>
+
       <div
+        className="rv-bottomnav"
         style={{
           position: "fixed",
           bottom: 0,
@@ -657,6 +737,7 @@ export default function App() {
       </div>
 
       <button
+        className="rv-fab"
         onClick={() => (view === "livreurs" ? setShowAddLivreur(true) : setShowAdd(true))}
         style={{
           position: "fixed",
