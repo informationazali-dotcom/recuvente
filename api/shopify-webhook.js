@@ -1,4 +1,4 @@
- // Fonction Vercel qui reçoit chaque nouvelle commande Shopify
+// Fonction Vercel qui reçoit chaque nouvelle commande Shopify
 // et l'enregistre automatiquement dans RecuVente (Supabase)
 
 import { createClient } from "@supabase/supabase-js";
@@ -6,7 +6,7 @@ import crypto from "crypto";
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL,
-  process.env.VITE_SUPABASE_ANON_KEY
+  process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
 // Vérifie que la requête vient bien de Shopify (sécurité)
