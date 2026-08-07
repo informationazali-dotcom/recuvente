@@ -243,13 +243,17 @@ export default function App() {
   }
 
   const livreursStats = useMemo(() => {
-    return livreurs.map((l) => {
+    const stats = livreurs.map((l) => {
       const mesCommandes = orders.filter((o) => o.livreur === l.nom);
-      const livrees = mesCommandes.filter((o) => o.statut === "confirmee").length;
+      const livrees = mesCommandes.filter((o) => o.statut === "confirmee");
+      const echouees = mesCommandes.filter((o) => o.statut === "echouee");
       const total = mesCommandes.length;
-      const taux = total ? Math.round((livrees / total) * 100) : null;
-      return { ...l, total, livrees, taux };
+      const taux = total ? Math.round((livrees.length / total) * 100) : null;
+      const montantRecupere = livrees.reduce((s, o) => s + Number(o.montant), 0);
+      const montantPerdu = echouees.reduce((s, o) => s + Number(o.montant), 0);
+      return { ...l, total, livrees: livrees.length, echouees: echouees.length, taux, montantRecupere, montantPerdu };
     });
+    return stats.sort((a, b) => (b.taux ?? -1) - (a.taux ?? -1));
   }, [livreurs, orders]);
 
   const clients = useMemo(() => {
@@ -878,34 +882,70 @@ function ClientDetail({ client, onClose, onSelectOrder }) {
 }
 
 function LivreursView({ livreurs, onDelete }) {
+  const maxTaux = Math.max(...livreurs.map((l) => l.taux ?? 0), 1);
+  const medailles = ["🥇", "🥈", "🥉"];
+
   return (
     <div style={{ padding: "20px 20px 8px" }}>
       <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 22, marginBottom: 4 }}>Livreurs</div>
-      <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 18 }}>{livreurs.length} livreur{livreurs.length > 1 ? "s" : ""}</div>
+      <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 18 }}>{livreurs.length} livreur{livreurs.length > 1 ? "s" : ""} · classés par taux de réussite</div>
 
       {livreurs.length === 0 && (
         <div style={{ textAlign: "center", padding: "40px 0", color: "#8A9089", fontSize: 14 }}>Aucun livreur ajouté. Appuie sur "+" pour en ajouter un.</div>
       )}
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {livreurs.map((l) => (
-          <div key={l.id} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>
-              <div style={{ fontWeight: 600, fontSize: 15 }}>{l.nom}</div>
-              <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{l.telephone} · {l.zone}</div>
-              <div style={{ fontSize: 12, marginTop: 5, color: "#6B7168" }}>
-                {l.total} commande{l.total > 1 ? "s" : ""}
-                {l.taux !== null && <span style={{ color: "#1a7a3c", fontWeight: 600 }}> · {l.taux}% de réussite</span>}
+      {livreurs.length > 1 && (
+        <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "16px 16px 10px", marginBottom: 14 }}>
+          <div style={{ fontSize: 11, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 12 }}>Comparatif — taux de réussite</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {livreurs.map((l) => (
+              <div key={l.id}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 3 }}>
+                  <span>{l.nom}</span>
+                  <span style={{ fontWeight: 600 }}>{l.taux !== null ? l.taux + "%" : "—"}</span>
+                </div>
+                <div style={{ background: "#ECE8DC", borderRadius: 999, height: 7, overflow: "hidden" }}>
+                  <div style={{ width: `${((l.taux ?? 0) / maxTaux) * 100}%`, background: "#1a7a3c", height: "100%", borderRadius: 999 }} />
+                </div>
               </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {livreurs.map((l, i) => (
+          <div key={l.id} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "14px 16px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 15, display: "flex", alignItems: "center", gap: 6 }}>
+                  {i < 3 && total_ok(l) ? medailles[i] : null} {l.nom}
+                </div>
+                <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{l.telephone} · {l.zone}</div>
+              </div>
+              <button onClick={() => onDelete(l.id)} style={{ background: "none", border: "none", color: "#D64933", padding: 6 }} aria-label="Retirer">
+                <Trash2 size={17} />
+              </button>
             </div>
-            <button onClick={() => onDelete(l.id)} style={{ background: "none", border: "none", color: "#D64933", padding: 6 }} aria-label="Retirer">
-              <Trash2 size={17} />
-            </button>
+            <div style={{ display: "flex", gap: 16, marginTop: 10, fontSize: 12.5 }}>
+              <span style={{ color: "#6B7168" }}>{l.total} commande{l.total > 1 ? "s" : ""}</span>
+              {l.taux !== null && <span style={{ color: "#1a7a3c", fontWeight: 600 }}>{l.taux}% réussite</span>}
+            </div>
+            {(l.montantRecupere > 0 || l.montantPerdu > 0) && (
+              <div style={{ display: "flex", gap: 16, marginTop: 6, fontSize: 12.5 }}>
+                <span style={{ color: "#1F9D6E" }}>+{formatFCFA(l.montantRecupere)} récupéré</span>
+                {l.montantPerdu > 0 && <span style={{ color: "#D64933" }}>-{formatFCFA(l.montantPerdu)} perdu</span>}
+              </div>
+            )}
           </div>
         ))}
       </div>
     </div>
   );
+}
+
+function total_ok(l) {
+  return l.total > 0;
 }
 
 function AddLivreur({ onClose, onAdd }) {
