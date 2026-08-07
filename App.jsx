@@ -359,7 +359,8 @@ export default function App() {
           }
           .rv-content-wrap {
             margin-left: 220px;
-            max-width: 720px;
+            max-width: none;
+            padding: 0 32px;
           }
         }
       `}</style>
