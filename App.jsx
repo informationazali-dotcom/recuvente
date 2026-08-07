@@ -71,9 +71,18 @@ export default function App() {
   const stats = useMemo(() => {
     const confirmees = orders.filter((o) => o.statut === "confirmee");
     const echouees = orders.filter((o) => o.statut === "echouee");
+    const enCours = orders.filter((o) => o.statut === "en_cours");
     const recupere = orders.reduce((sum, o) => sum + (o.recupere ? Number(o.montant) : 0), 0);
     const tauxLivraison = orders.length ? Math.round((confirmees.length / orders.length) * 100) : 0;
-    return { recupere, aRisque: echouees.length + orders.filter((o) => o.statut === "en_cours").length, tauxLivraison, total: orders.length };
+    return {
+      recupere,
+      aRisque: echouees.length + enCours.length,
+      tauxLivraison,
+      total: orders.length,
+      livrees: confirmees.length,
+      enAttente: enCours.length,
+      echouees: echouees.length,
+    };
   }, [orders]);
 
   const filtered = useMemo(() => {
@@ -201,6 +210,26 @@ export default function App() {
         </div>
       </div>
 
+      {stats.total > 0 && (
+        <div style={{ margin: "16px 20px 0", background: "white", border: "1px solid #ECE8DC", borderRadius: 14, padding: "18px 20px", display: "flex", alignItems: "center", gap: 20 }}>
+          <StatusDonut livrees={stats.livrees} enAttente={stats.enAttente} echouees={stats.echouees} />
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+              <span style={{ width: 9, height: 9, borderRadius: "50%", background: STATUS.confirmee.color, display: "inline-block" }} />
+              Livrées <span style={{ marginLeft: "auto", fontWeight: 600 }}>{stats.livrees}</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+              <span style={{ width: 9, height: 9, borderRadius: "50%", background: STATUS.en_cours.color, display: "inline-block" }} />
+              En attente <span style={{ marginLeft: "auto", fontWeight: 600 }}>{stats.enAttente}</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+              <span style={{ width: 9, height: 9, borderRadius: "50%", background: STATUS.echouee.color, display: "inline-block" }} />
+              Échouées <span style={{ marginLeft: "auto", fontWeight: 600 }}>{stats.echouees}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ display: "flex", gap: 8, padding: "16px 20px 8px", overflowX: "auto" }}>
         {[
           { key: "toutes", label: "Toutes" },
@@ -319,6 +348,46 @@ export default function App() {
       {selected && <OrderDetail order={selected} onClose={() => setSelected(null)} onStatus={updateStatus} />}
       {showAdd && <AddOrder onClose={() => setShowAdd(false)} onAdd={addOrder} />}
     </div>
+  );
+}
+
+function StatusDonut({ livrees, enAttente, echouees }) {
+  const total = livrees + enAttente + echouees || 1;
+  const r = 34;
+  const circ = 2 * Math.PI * r;
+  const segs = [
+    { val: livrees, color: STATUS.confirmee.color },
+    { val: enAttente, color: STATUS.en_cours.color },
+    { val: echouees, color: STATUS.echouee.color },
+  ];
+  let offset = 0;
+  return (
+    <svg width="92" height="92" viewBox="0 0 92 92" style={{ flexShrink: 0 }}>
+      <circle cx="46" cy="46" r={r} fill="none" stroke="#ECE8DC" strokeWidth="12" />
+      {segs.map((s, i) => {
+        const frac = s.val / total;
+        const len = frac * circ;
+        const el = (
+          <circle
+            key={i}
+            cx="46"
+            cy="46"
+            r={r}
+            fill="none"
+            stroke={s.color}
+            strokeWidth="12"
+            strokeDasharray={`${len} ${circ - len}`}
+            strokeDashoffset={-offset}
+            transform="rotate(-90 46 46)"
+          />
+        );
+        offset += len;
+        return el;
+      })}
+      <text x="46" y="50" textAnchor="middle" fontFamily="'IBM Plex Mono', monospace" fontWeight="600" fontSize="18" fill="#16231F">
+        {livrees + enAttente + echouees}
+      </text>
+    </svg>
   );
 }
 
