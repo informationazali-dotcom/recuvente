@@ -92,17 +92,11 @@ export default function App() {
       const d = new Date(o.created_at);
       const dayKey = d.toISOString().slice(0, 10);
       if (!groups[dayKey]) {
-        const dDate = new Date(d);
-        dDate.setHours(0, 0, 0, 0);
-        let label;
-        if (dDate.getTime() === today.getTime()) label = "Aujourd'hui";
-        else if (dDate.getTime() === yesterday.getTime()) label = "Hier";
-        else
-          label = d.toLocaleDateString("fr-FR", {
-            weekday: "long",
-            day: "numeric",
-            month: "long",
-          });
+        const label = d.toLocaleDateString("fr-FR", {
+          weekday: "long",
+          day: "numeric",
+          month: "long",
+        });
         groups[dayKey] = { label, orders: [] };
       }
       groups[dayKey].orders.push(o);
@@ -171,8 +165,15 @@ export default function App() {
 
       <div style={{ background: "#1a7a3c", color: "#FAFAF7", padding: "28px 20px 24px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 20, letterSpacing: "-0.01em" }}>
-            RECU<span style={{ color: "#e8920a" }}>VENTE</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+            <div style={{ width: 26, height: 26, borderRadius: 7, background: "rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <svg width="15" height="15" viewBox="0 0 100 100">
+                <polyline points="15,62 40,42 55,56 85,28" stroke="#e8920a" strokeWidth="11" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
+            <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 20, letterSpacing: "-0.01em" }}>
+              RECU<span style={{ color: "#e8920a" }}>VENTE</span>
+            </div>
           </div>
           <div style={{ fontSize: 12, opacity: 0.7 }}>Azali Express</div>
         </div>
