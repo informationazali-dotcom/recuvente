@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Phone, MessageCircle, MessageSquare, Plus, ChevronLeft, X, Check } from "lucide-react";
+import { Phone, MessageCircle, MessageSquare, Plus, ChevronLeft, X, Check, Users, Truck, Trash2 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
 const STATUS = {
@@ -35,9 +35,13 @@ function smsMsg(order) {
 
 export default function App() {
   const [orders, setOrders] = useState([]);
+  const [livreurs, setLivreurs] = useState([]);
+  const [view, setView] = useState("dashboard");
   const [filter, setFilter] = useState("toutes");
   const [selected, setSelected] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [showAddLivreur, setShowAddLivreur] = useState(false);
+  const [selectedClient, setSelectedClient] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [toast, setToast] = useState(null);
   const [error, setError] = useState(null);
@@ -56,10 +60,21 @@ export default function App() {
     setLoaded(true);
   }
 
+  async function loadLivreurs() {
+    const { data, error } = await supabase
+      .from("livreurs")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (!error) setLivreurs(data || []);
+  }
+
   useEffect(() => {
     loadOrders();
-    // Rafraîchit automatiquement toutes les 15s pour voir les changements du closer
-    const interval = setInterval(loadOrders, 15000);
+    loadLivreurs();
+    const interval = setInterval(() => {
+      loadOrders();
+      loadLivreurs();
+    }, 15000);
     return () => clearInterval(interval);
   }, []);
 
@@ -142,6 +157,67 @@ export default function App() {
     showToast("Commande ajoutée");
   }
 
+  async function addLivreur(livreur) {
+    const { error } = await supabase.from("livreurs").insert([livreur]);
+    if (error) {
+      showToast("Erreur: " + error.message);
+      return;
+    }
+    await loadLivreurs();
+    setShowAddLivreur(false);
+    showToast("Livreur ajouté");
+  }
+
+  async function deleteLivreur(id) {
+    const { error } = await supabase.from("livreurs").delete().eq("id", id);
+    if (error) {
+      showToast("Erreur: " + error.message);
+      return;
+    }
+    await loadLivreurs();
+    showToast("Livreur retiré");
+  }
+
+  async function assignLivreur(orderId, livreurNom) {
+    const { error } = await supabase.from("commandes").update({ livreur: livreurNom }).eq("id", orderId);
+    if (error) {
+      showToast("Erreur: " + error.message);
+      return;
+    }
+    await loadOrders();
+    if (selected && selected.id === orderId) setSelected((s) => ({ ...s, livreur: livreurNom }));
+  }
+
+  const livreursStats = useMemo(() => {
+    return livreurs.map((l) => {
+      const mesCommandes = orders.filter((o) => o.livreur === l.nom);
+      const livrees = mesCommandes.filter((o) => o.statut === "confirmee").length;
+      const total = mesCommandes.length;
+      const taux = total ? Math.round((livrees / total) * 100) : null;
+      return { ...l, total, livrees, taux };
+    });
+  }, [livreurs, orders]);
+
+  const clients = useMemo(() => {
+    const map = {};
+    orders.forEach((o) => {
+      const key = o.tel || o.client;
+      if (!map[key]) {
+        map[key] = { nom: o.client, tel: o.tel, zone: o.zone, commandes: [] };
+      }
+      map[key].commandes.push(o);
+    });
+    return Object.values(map)
+      .map((c) => ({
+        ...c,
+        total: c.commandes.length,
+        confirmees: c.commandes.filter((o) => o.statut === "confirmee").length,
+        echouees: c.commandes.filter((o) => o.statut === "echouee").length,
+        montantTotal: c.commandes.reduce((s, o) => s + (o.recupere ? Number(o.montant) : 0), 0),
+      }))
+      .sort((a, b) => b.total - a.total);
+  }, [orders]);
+
   if (!loaded) {
     return (
       <div style={{ background: "#FAFAF7", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'IBM Plex Sans', sans-serif" }}>
@@ -165,13 +241,15 @@ export default function App() {
   }
 
   return (
-    <div style={{ background: "#FAFAF7", minHeight: "100vh", fontFamily: "'IBM Plex Sans', sans-serif", color: "#16231F", paddingBottom: 40 }}>
+    <div style={{ background: "#FAFAF7", minHeight: "100vh", fontFamily: "'IBM Plex Sans', sans-serif", color: "#16231F", paddingBottom: 76 }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');
         * { box-sizing: border-box; }
         button { font-family: inherit; cursor: pointer; }
       `}</style>
 
+      {view === "dashboard" && (
+      <>
       <div style={{ background: "#1a7a3c", color: "#FAFAF7", padding: "28px 20px 24px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
@@ -316,12 +394,66 @@ export default function App() {
           </div>
         ))}
       </div>
+      </>
+      )}
 
-      <button
-        onClick={() => setShowAdd(true)}
+      {view === "clients" && (
+        <ClientsView clients={clients} onSelect={setSelectedClient} />
+      )}
+
+      {view === "livreurs" && (
+        <LivreursView livreurs={livreursStats} onDelete={deleteLivreur} />
+      )}
+
+      <div
         style={{
           position: "fixed",
-          bottom: 24,
+          bottom: 0,
+          left: 0,
+          right: 0,
+          background: "white",
+          borderTop: "1px solid #ECE8DC",
+          display: "flex",
+          padding: "8px 12px",
+          paddingBottom: "calc(8px + env(safe-area-inset-bottom))",
+          zIndex: 20,
+        }}
+      >
+        {[
+          { key: "dashboard", label: "Commandes", icon: Package },
+          { key: "clients", label: "Clients", icon: Users },
+          { key: "livreurs", label: "Livreurs", icon: Truck },
+        ].map((t) => {
+          const Icon = t.icon;
+          const active = view === t.key;
+          return (
+            <button
+              key={t.key}
+              onClick={() => setView(t.key)}
+              style={{
+                flex: 1,
+                background: "none",
+                border: "none",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 3,
+                padding: "6px 0",
+                color: active ? "#1a7a3c" : "#8A9089",
+              }}
+            >
+              <Icon size={20} />
+              <span style={{ fontSize: 11, fontWeight: active ? 600 : 500 }}>{t.label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <button
+        onClick={() => (view === "livreurs" ? setShowAddLivreur(true) : setShowAdd(true))}
+        style={{
+          position: "fixed",
+          bottom: 84,
           right: 24,
           width: 52,
           height: 52,
@@ -329,24 +461,34 @@ export default function App() {
           background: "#1a7a3c",
           color: "white",
           border: "none",
-          display: "flex",
+          display: view === "clients" ? "none" : "flex",
           alignItems: "center",
           justifyContent: "center",
           boxShadow: "0 6px 18px rgba(15,61,62,0.35)",
         }}
-        aria-label="Ajouter une commande"
+        aria-label="Ajouter"
       >
         <Plus size={24} />
       </button>
 
       {toast && (
-        <div style={{ position: "fixed", bottom: 90, left: "50%", transform: "translateX(-50%)", background: "#16231F", color: "white", padding: "9px 18px", borderRadius: 999, fontSize: 13, fontWeight: 500 }}>
+        <div style={{ position: "fixed", bottom: 150, left: "50%", transform: "translateX(-50%)", background: "#16231F", color: "white", padding: "9px 18px", borderRadius: 999, fontSize: 13, fontWeight: 500 }}>
           {toast}
         </div>
       )}
 
-      {selected && <OrderDetail order={selected} onClose={() => setSelected(null)} onStatus={updateStatus} />}
+      {selected && (
+        <OrderDetail
+          order={selected}
+          onClose={() => setSelected(null)}
+          onStatus={updateStatus}
+          livreurs={livreurs}
+          onAssignLivreur={assignLivreur}
+        />
+      )}
       {showAdd && <AddOrder onClose={() => setShowAdd(false)} onAdd={addOrder} />}
+      {showAddLivreur && <AddLivreur onClose={() => setShowAddLivreur(false)} onAdd={addLivreur} />}
+      {selectedClient && <ClientDetail client={selectedClient} onClose={() => setSelectedClient(null)} onSelectOrder={(o) => { setSelectedClient(null); setView("dashboard"); setSelected(o); }} />}
     </div>
   );
 }
@@ -391,7 +533,7 @@ function StatusDonut({ livrees, enAttente, echouees }) {
   );
 }
 
-function OrderDetail({ order, onClose, onStatus }) {
+function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", zIndex: 50 }} onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", maxHeight: "88vh", overflowY: "auto", borderRadius: "18px 18px 0 0", padding: "18px 20px 28px" }}>
@@ -411,6 +553,22 @@ function OrderDetail({ order, onClose, onStatus }) {
           <div style={{ fontWeight: 600, marginTop: 2 }}>{order.produit}</div>
           <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 20, marginTop: 6, color: "#1a7a3c" }}>{formatFCFA(order.montant)}</div>
         </div>
+
+        {livreurs && livreurs.length > 0 && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 6 }}>Livreur assigné</div>
+            <select
+              value={order.livreur || ""}
+              onChange={(e) => onAssignLivreur(order.id, e.target.value)}
+              style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, background: "white" }}
+            >
+              <option value="">Non assigné</option>
+              {livreurs.map((l) => (
+                <option key={l.id} value={l.nom}>{l.nom}</option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <div style={{ marginBottom: 14 }}>
           <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 6 }}>Statut</div>
@@ -491,6 +649,148 @@ function AddOrder({ onClose, onAdd }) {
           style={{ width: "100%", marginTop: 6, padding: "13px 0", borderRadius: 10, border: "none", background: canSubmit ? "#1a7a3c" : "#DDD8CC", color: "white", fontWeight: 600, fontSize: 14.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
         >
           <Check size={17} /> Ajouter la commande
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ClientsView({ clients, onSelect }) {
+  return (
+    <div style={{ padding: "20px 20px 8px" }}>
+      <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 22, marginBottom: 4 }}>Clients</div>
+      <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 18 }}>{clients.length} client{clients.length > 1 ? "s" : ""} au total</div>
+
+      {clients.length === 0 && (
+        <div style={{ textAlign: "center", padding: "40px 0", color: "#8A9089", fontSize: 14 }}>Aucun client pour l'instant.</div>
+      )}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {clients.map((c, i) => (
+          <button
+            key={i}
+            onClick={() => onSelect(c)}
+            style={{ textAlign: "left", background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}
+          >
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 15 }}>{c.nom}</div>
+              <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{c.tel} · {c.zone}</div>
+              <div style={{ fontSize: 12, marginTop: 5, display: "flex", gap: 10 }}>
+                <span style={{ color: "#1a7a3c" }}>{c.confirmees} livrée{c.confirmees > 1 ? "s" : ""}</span>
+                {c.echouees > 0 && <span style={{ color: "#D64933" }}>{c.echouees} échouée{c.echouees > 1 ? "s" : ""}</span>}
+              </div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 15 }}>{c.total}</div>
+              <div style={{ fontSize: 10.5, color: "#8A9089" }}>commande{c.total > 1 ? "s" : ""}</div>
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ClientDetail({ client, onClose, onSelectOrder }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", zIndex: 50 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", maxHeight: "88vh", overflowY: "auto", borderRadius: "18px 18px 0 0", padding: "18px 20px 28px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+          <button onClick={onClose} style={{ background: "none", border: "none", padding: 4 }}>
+            <ChevronLeft size={22} />
+          </button>
+          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 19 }}>{client.nom}</div>
+        </div>
+        <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 16 }}>{client.tel} · {client.zone}</div>
+
+        <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 8 }}>
+          Historique des commandes ({client.commandes.length})
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {client.commandes.map((o) => {
+            const s = STATUS[o.statut];
+            return (
+              <button
+                key={o.id}
+                onClick={() => onSelectOrder(o)}
+                style={{ textAlign: "left", background: "white", border: "1px solid #ECE8DC", borderLeft: `4px solid ${s.color}`, borderRadius: 10, padding: "12px 14px", display: "flex", justifyContent: "space-between" }}
+              >
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 14 }}>{o.produit}</div>
+                  <div style={{ fontSize: 11.5, color: s.color, marginTop: 3, fontWeight: 500 }}>{s.label}</div>
+                </div>
+                <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 14 }}>{formatFCFA(o.montant)}</div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LivreursView({ livreurs, onDelete }) {
+  return (
+    <div style={{ padding: "20px 20px 8px" }}>
+      <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 22, marginBottom: 4 }}>Livreurs</div>
+      <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 18 }}>{livreurs.length} livreur{livreurs.length > 1 ? "s" : ""}</div>
+
+      {livreurs.length === 0 && (
+        <div style={{ textAlign: "center", padding: "40px 0", color: "#8A9089", fontSize: 14 }}>Aucun livreur ajouté. Appuie sur "+" pour en ajouter un.</div>
+      )}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {livreurs.map((l) => (
+          <div key={l.id} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 15 }}>{l.nom}</div>
+              <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{l.telephone} · {l.zone}</div>
+              <div style={{ fontSize: 12, marginTop: 5, color: "#6B7168" }}>
+                {l.total} commande{l.total > 1 ? "s" : ""}
+                {l.taux !== null && <span style={{ color: "#1a7a3c", fontWeight: 600 }}> · {l.taux}% de réussite</span>}
+              </div>
+            </div>
+            <button onClick={() => onDelete(l.id)} style={{ background: "none", border: "none", color: "#D64933", padding: 6 }} aria-label="Retirer">
+              <Trash2 size={17} />
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AddLivreur({ onClose, onAdd }) {
+  const [form, setForm] = useState({ nom: "", telephone: "", zone: "" });
+  const canSubmit = form.nom && form.telephone;
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", zIndex: 50 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", borderRadius: "18px 18px 0 0", padding: "18px 20px 28px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 19 }}>Nouveau livreur</div>
+          <button onClick={onClose} style={{ background: "none", border: "none" }}><X size={20} /></button>
+        </div>
+
+        {["nom", "telephone", "zone"].map((field) => (
+          <div key={field} style={{ marginBottom: 10 }}>
+            <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4, textTransform: "capitalize" }}>
+              {field === "telephone" ? "Téléphone" : field}
+            </label>
+            <input
+              value={form[field]}
+              onChange={(e) => setForm({ ...form, [field]: e.target.value })}
+              style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, background: "white" }}
+            />
+          </div>
+        ))}
+
+        <button
+          disabled={!canSubmit}
+          onClick={() => canSubmit && onAdd(form)}
+          style={{ width: "100%", marginTop: 6, padding: "13px 0", borderRadius: 10, border: "none", background: canSubmit ? "#1a7a3c" : "#DDD8CC", color: "white", fontWeight: 600, fontSize: 14.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+        >
+          <Check size={17} /> Ajouter le livreur
         </button>
       </div>
     </div>
