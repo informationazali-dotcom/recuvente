@@ -147,6 +147,18 @@ export default function App() {
     return ordersInRange.filter((o) => o.statut === filter);
   }, [ordersInRange, filter]);
 
+  const evolution = useMemo(() => {
+    const map = {};
+    ordersInRange.forEach((o) => {
+      const d = new Date(o.created_at);
+      const key = d.toISOString().slice(0, 10);
+      if (!map[key]) map[key] = { date: key, commandes: 0, revenus: 0, label: d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" }) };
+      map[key].commandes += 1;
+      map[key].revenus += Number(o.montant);
+    });
+    return Object.values(map).sort((a, b) => (a.date < b.date ? -1 : 1));
+  }, [ordersInRange]);
+
   const groupedByDay = useMemo(() => {
     const groups = {};
     const today = new Date();
@@ -397,6 +409,13 @@ export default function App() {
         </div>
       )}
 
+      {evolution.length > 1 && (
+        <div style={{ margin: "14px 20px 0", background: "white", border: "1px solid #ECE8DC", borderRadius: 14, padding: "18px 20px 14px" }}>
+          <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>Évolution des commandes</div>
+          <EvolutionChart data={evolution} />
+        </div>
+      )}
+
       <div style={{ display: "flex", gap: 8, padding: "16px 20px 8px", overflowX: "auto" }}>
         {[
           { key: "toutes", label: "Toutes" },
@@ -579,6 +598,46 @@ export default function App() {
       {showAddLivreur && <AddLivreur onClose={() => setShowAddLivreur(false)} onAdd={addLivreur} />}
       {selectedClient && <ClientDetail client={selectedClient} onClose={() => setSelectedClient(null)} onSelectOrder={(o) => { setSelectedClient(null); setView("dashboard"); setSelected(o); }} />}
     </div>
+  );
+}
+
+function EvolutionChart({ data }) {
+  const w = 300;
+  const h = 110;
+  const padL = 4;
+  const padR = 4;
+  const padT = 8;
+  const padB = 20;
+  const maxVal = Math.max(...data.map((d) => d.commandes), 1);
+  const innerW = w - padL - padR;
+  const innerH = h - padT - padB;
+  const stepX = data.length > 1 ? innerW / (data.length - 1) : 0;
+
+  const points = data.map((d, i) => {
+    const x = padL + i * stepX;
+    const y = padT + innerH - (d.commandes / maxVal) * innerH;
+    return { x, y, d };
+  });
+
+  const pathD = points.map((p, i) => (i === 0 ? `M ${p.x} ${p.y}` : `L ${p.x} ${p.y}`)).join(" ");
+  const areaD = `${pathD} L ${points[points.length - 1].x} ${padT + innerH} L ${points[0].x} ${padT + innerH} Z`;
+
+  return (
+    <svg width="100%" height={h + 10} viewBox={`0 0 ${w} ${h + 10}`} preserveAspectRatio="none" style={{ overflow: "visible" }}>
+      <path d={areaD} fill="#EAF3DE" />
+      <path d={pathD} fill="none" stroke="#1a7a3c" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+      {points.map((p, i) => (
+        <circle key={i} cx={p.x} cy={p.y} r="2.5" fill="#1a7a3c" />
+      ))}
+      {points.map((p, i) => {
+        if (data.length > 8 && i % Math.ceil(data.length / 6) !== 0 && i !== data.length - 1) return null;
+        return (
+          <text key={"t" + i} x={p.x} y={h + 8} fontSize="8" fill="#8A9089" textAnchor="middle" fontFamily="'IBM Plex Sans', sans-serif">
+            {p.d.label}
+          </text>
+        );
+      })}
+    </svg>
   );
 }
 
