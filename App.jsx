@@ -8,6 +8,8 @@ const STATUS = {
   echouee: { label: "Échouée", color: "#D64933", bg: "#FBEAE6" },
 };
 
+const ADMIN_EMAIL = import.meta.env.VITE_ADMIN_EMAIL || "";
+
 function formatFCFA(n) {
   return Number(n).toLocaleString("fr-FR").replace(/,/g, " ") + " F";
 }
@@ -439,18 +441,22 @@ export default function App() {
           <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginBottom: 8, padding: "0 2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {session.user.email}
           </div>
-          <button
-            onClick={() => setShowInvite(true)}
-            style={{ width: "100%", padding: "8px 0", borderRadius: 9, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "rgba(255,255,255,0.75)", fontWeight: 500, fontSize: 12.5, marginBottom: 6, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
-          >
-            <Users size={13} /> Inviter quelqu'un
-          </button>
-          <button
-            onClick={() => setShowTeam(true)}
-            style={{ width: "100%", padding: "8px 0", borderRadius: 9, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "rgba(255,255,255,0.75)", fontWeight: 500, fontSize: 12.5, marginBottom: 6, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
-          >
-            <Users size={13} /> Gérer l'équipe
-          </button>
+          {session.user.email === ADMIN_EMAIL && (
+            <>
+              <button
+                onClick={() => setShowInvite(true)}
+                style={{ width: "100%", padding: "8px 0", borderRadius: 9, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "rgba(255,255,255,0.75)", fontWeight: 500, fontSize: 12.5, marginBottom: 6, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+              >
+                <Users size={13} /> Inviter quelqu'un
+              </button>
+              <button
+                onClick={() => setShowTeam(true)}
+                style={{ width: "100%", padding: "8px 0", borderRadius: 9, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "rgba(255,255,255,0.75)", fontWeight: 500, fontSize: 12.5, marginBottom: 6, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+              >
+                <Users size={13} /> Gérer l'équipe
+              </button>
+            </>
+          )}
           <button
             onClick={() => supabase.auth.signOut()}
             style={{ width: "100%", padding: "8px 0", borderRadius: 9, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "rgba(255,255,255,0.6)", fontWeight: 500, fontSize: 12.5 }}
@@ -477,20 +483,24 @@ export default function App() {
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <button
-              onClick={() => setShowInvite(true)}
-              className="rv-mobile-only-logout"
-              style={{ background: "rgba(255,255,255,0.12)", border: "none", color: "white", fontSize: 11, padding: "4px 9px", borderRadius: 6, fontWeight: 500 }}
-            >
-              Inviter
-            </button>
-            <button
-              onClick={() => setShowTeam(true)}
-              className="rv-mobile-only-logout"
-              style={{ background: "rgba(255,255,255,0.12)", border: "none", color: "white", fontSize: 11, padding: "4px 9px", borderRadius: 6, fontWeight: 500 }}
-            >
-              Équipe
-            </button>
+            {session.user.email === ADMIN_EMAIL && (
+              <>
+                <button
+                  onClick={() => setShowInvite(true)}
+                  className="rv-mobile-only-logout"
+                  style={{ background: "rgba(255,255,255,0.12)", border: "none", color: "white", fontSize: 11, padding: "4px 9px", borderRadius: 6, fontWeight: 500 }}
+                >
+                  Inviter
+                </button>
+                <button
+                  onClick={() => setShowTeam(true)}
+                  className="rv-mobile-only-logout"
+                  style={{ background: "rgba(255,255,255,0.12)", border: "none", color: "white", fontSize: 11, padding: "4px 9px", borderRadius: 6, fontWeight: 500 }}
+                >
+                  Équipe
+                </button>
+              </>
+            )}
             <button
               onClick={() => supabase.auth.signOut()}
               className="rv-mobile-only-logout"
@@ -1379,9 +1389,10 @@ function InviteModal({ onClose }) {
     }
     setLoading(true);
     try {
+      const { data: sessionData } = await supabase.auth.getSession();
       const res = await fetch("/api/invite-user", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionData.session?.access_token}` },
         body: JSON.stringify({ email, password }),
       });
       const json = await res.json();
@@ -1463,7 +1474,10 @@ function TeamModal({ onClose, currentUserId }) {
 
   async function loadUsers() {
     try {
-      const res = await fetch("/api/team");
+      const { data: sessionData } = await supabase.auth.getSession();
+      const res = await fetch("/api/team", {
+        headers: { Authorization: `Bearer ${sessionData.session?.access_token}` },
+      });
       const json = await res.json();
       if (!res.ok) {
         setError(json.error || "Erreur de chargement");
@@ -1482,9 +1496,10 @@ function TeamModal({ onClose, currentUserId }) {
   async function removeUser(id) {
     setDeletingId(id);
     try {
+      const { data: sessionData } = await supabase.auth.getSession();
       const res = await fetch("/api/team", {
         method: "DELETE",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionData.session?.access_token}` },
         body: JSON.stringify({ userId: id }),
       });
       const json = await res.json();
