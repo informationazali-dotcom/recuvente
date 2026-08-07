@@ -42,6 +42,7 @@ export default function App() {
   const [selected, setSelected] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
   const [showAddLivreur, setShowAddLivreur] = useState(false);
+  const [showInvite, setShowInvite] = useState(false);
   const [selectedClient, setSelectedClient] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [toast, setToast] = useState(null);
@@ -438,6 +439,12 @@ export default function App() {
             {session.user.email}
           </div>
           <button
+            onClick={() => setShowInvite(true)}
+            style={{ width: "100%", padding: "8px 0", borderRadius: 9, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "rgba(255,255,255,0.75)", fontWeight: 500, fontSize: 12.5, marginBottom: 6, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+          >
+            <Users size={13} /> Inviter quelqu'un
+          </button>
+          <button
             onClick={() => supabase.auth.signOut()}
             style={{ width: "100%", padding: "8px 0", borderRadius: 9, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "rgba(255,255,255,0.6)", fontWeight: 500, fontSize: 12.5 }}
           >
@@ -462,8 +469,14 @@ export default function App() {
               RECU<span style={{ color: "#e8920a" }}>VENTE</span>
             </div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ fontSize: 12, opacity: 0.7 }}>Azali Express</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              onClick={() => setShowInvite(true)}
+              className="rv-mobile-only-logout"
+              style={{ background: "rgba(255,255,255,0.12)", border: "none", color: "white", fontSize: 11, padding: "4px 9px", borderRadius: 6, fontWeight: 500 }}
+            >
+              Inviter
+            </button>
             <button
               onClick={() => supabase.auth.signOut()}
               className="rv-mobile-only-logout"
@@ -833,6 +846,7 @@ export default function App() {
       )}
       {showAdd && <AddOrder onClose={() => setShowAdd(false)} onAdd={addOrder} />}
       {showAddLivreur && <AddLivreur onClose={() => setShowAddLivreur(false)} onAdd={addLivreur} />}
+      {showInvite && <InviteModal onClose={() => setShowInvite(false)} />}
       {selectedClient && <ClientDetail client={selectedClient} onClose={() => setSelectedClient(null)} onSelectOrder={(o) => { setSelectedClient(null); setView("dashboard"); setSelected(o); }} />}
     </div>
   );
@@ -1330,6 +1344,97 @@ function LoginScreen() {
             {mode === "signin" ? "Pas encore de compte ? En créer un" : "Déjà un compte ? Se connecter"}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function InviteModal({ onClose }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [success, setSuccess] = useState(false);
+
+  async function submit() {
+    setErrorMsg("");
+    if (!email || !password) {
+      setErrorMsg("Remplis email et mot de passe.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch("/api/invite-user", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setErrorMsg(json.error || "Erreur lors de la création du compte.");
+      } else {
+        setSuccess(true);
+      }
+    } catch (e) {
+      setErrorMsg("Erreur réseau: " + e.message);
+    }
+    setLoading(false);
+  }
+
+  return (
+    <div className="rv-modal-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", zIndex: 50 }} onClick={onClose}>
+      <div className="rv-modal-sheet" onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", borderRadius: "18px 18px 0 0", padding: "18px 20px 28px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 19 }}>Inviter quelqu'un</div>
+          <button onClick={onClose} style={{ background: "none", border: "none" }}><X size={20} /></button>
+        </div>
+
+        {success ? (
+          <div>
+            <div style={{ background: "#EAF3DE", color: "#3B6D11", fontSize: 13.5, padding: "14px", borderRadius: 10, marginBottom: 16 }}>
+              ✅ Compte créé pour <strong>{email}</strong>.<br />Communique-lui l'email et le mot de passe pour qu'il se connecte sur recuvente.vercel.app.
+            </div>
+            <button
+              onClick={onClose}
+              style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none", background: "#1a7a3c", color: "white", fontWeight: 600, fontSize: 14.5 }}
+            >
+              Fermer
+            </button>
+          </div>
+        ) : (
+          <>
+            <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 16 }}>
+              Crée un compte pour un membre de ton équipe (closer, etc.). Donne-lui ensuite l'email et le mot de passe.
+            </div>
+
+            <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4 }}>Email</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, marginBottom: 12 }}
+            />
+
+            <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4 }}>Mot de passe temporaire</label>
+            <input
+              type="text"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Au moins 6 caractères"
+              style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, marginBottom: 14 }}
+            />
+
+            {errorMsg && <div style={{ background: "#FBEAE6", color: "#D64933", fontSize: 12.5, padding: "8px 10px", borderRadius: 8, marginBottom: 12 }}>{errorMsg}</div>}
+
+            <button
+              onClick={submit}
+              disabled={loading}
+              style={{ width: "100%", padding: "13px 0", borderRadius: 10, border: "none", background: "#1a7a3c", color: "white", fontWeight: 600, fontSize: 14.5, opacity: loading ? 0.6 : 1 }}
+            >
+              {loading ? "Création..." : "Créer le compte"}
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
