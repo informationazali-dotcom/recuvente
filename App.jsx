@@ -43,6 +43,7 @@ export default function App() {
   const [showAdd, setShowAdd] = useState(false);
   const [showAddLivreur, setShowAddLivreur] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
+  const [showTeam, setShowTeam] = useState(false);
   const [selectedClient, setSelectedClient] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [toast, setToast] = useState(null);
@@ -445,6 +446,12 @@ export default function App() {
             <Users size={13} /> Inviter quelqu'un
           </button>
           <button
+            onClick={() => setShowTeam(true)}
+            style={{ width: "100%", padding: "8px 0", borderRadius: 9, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "rgba(255,255,255,0.75)", fontWeight: 500, fontSize: 12.5, marginBottom: 6, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+          >
+            <Users size={13} /> Gérer l'équipe
+          </button>
+          <button
             onClick={() => supabase.auth.signOut()}
             style={{ width: "100%", padding: "8px 0", borderRadius: 9, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "rgba(255,255,255,0.6)", fontWeight: 500, fontSize: 12.5 }}
           >
@@ -476,6 +483,13 @@ export default function App() {
               style={{ background: "rgba(255,255,255,0.12)", border: "none", color: "white", fontSize: 11, padding: "4px 9px", borderRadius: 6, fontWeight: 500 }}
             >
               Inviter
+            </button>
+            <button
+              onClick={() => setShowTeam(true)}
+              className="rv-mobile-only-logout"
+              style={{ background: "rgba(255,255,255,0.12)", border: "none", color: "white", fontSize: 11, padding: "4px 9px", borderRadius: 6, fontWeight: 500 }}
+            >
+              Équipe
             </button>
             <button
               onClick={() => supabase.auth.signOut()}
@@ -847,6 +861,7 @@ export default function App() {
       {showAdd && <AddOrder onClose={() => setShowAdd(false)} onAdd={addOrder} />}
       {showAddLivreur && <AddLivreur onClose={() => setShowAddLivreur(false)} onAdd={addLivreur} />}
       {showInvite && <InviteModal onClose={() => setShowInvite(false)} />}
+      {showTeam && <TeamModal onClose={() => setShowTeam(false)} currentUserId={session.user.id} />}
       {selectedClient && <ClientDetail client={selectedClient} onClose={() => setSelectedClient(null)} onSelectOrder={(o) => { setSelectedClient(null); setView("dashboard"); setSelected(o); }} />}
     </div>
   );
@@ -1434,6 +1449,107 @@ function InviteModal({ onClose }) {
               {loading ? "Création..." : "Créer le compte"}
             </button>
           </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TeamModal({ onClose, currentUserId }) {
+  const [users, setUsers] = useState(null);
+  const [error, setError] = useState("");
+  const [deletingId, setDeletingId] = useState(null);
+  const [confirmId, setConfirmId] = useState(null);
+
+  async function loadUsers() {
+    try {
+      const res = await fetch("/api/team");
+      const json = await res.json();
+      if (!res.ok) {
+        setError(json.error || "Erreur de chargement");
+      } else {
+        setUsers(json.users);
+      }
+    } catch (e) {
+      setError("Erreur réseau: " + e.message);
+    }
+  }
+
+  useEffect(() => {
+    loadUsers();
+  }, []);
+
+  async function removeUser(id) {
+    setDeletingId(id);
+    try {
+      const res = await fetch("/api/team", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: id }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setError(json.error || "Erreur lors de la suppression");
+      } else {
+        setUsers((prev) => prev.filter((u) => u.id !== id));
+      }
+    } catch (e) {
+      setError("Erreur réseau: " + e.message);
+    }
+    setDeletingId(null);
+    setConfirmId(null);
+  }
+
+  return (
+    <div className="rv-modal-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", zIndex: 50 }} onClick={onClose}>
+      <div className="rv-modal-sheet" onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", maxHeight: "80vh", overflowY: "auto", borderRadius: "18px 18px 0 0", padding: "18px 20px 28px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 19 }}>Équipe</div>
+          <button onClick={onClose} style={{ background: "none", border: "none" }}><X size={20} /></button>
+        </div>
+
+        {error && <div style={{ background: "#FBEAE6", color: "#D64933", fontSize: 12.5, padding: "8px 10px", borderRadius: 8, marginBottom: 12 }}>{error}</div>}
+
+        {users === null && !error && <div style={{ textAlign: "center", padding: "30px 0", color: "#8A9089", fontSize: 14 }}>Chargement...</div>}
+
+        {users && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {users.map((u) => (
+              <div key={u.id} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 14 }}>
+                    {u.email} {u.id === currentUserId && <span style={{ fontSize: 11, color: "#1a7a3c", fontWeight: 600 }}>(toi)</span>}
+                  </div>
+                  <div style={{ fontSize: 11.5, color: "#8A9089", marginTop: 2 }}>
+                    {u.last_sign_in_at ? "Dernière connexion : " + new Date(u.last_sign_in_at).toLocaleDateString("fr-FR") : "Jamais connecté"}
+                  </div>
+                </div>
+                {u.id !== currentUserId && (
+                  confirmId === u.id ? (
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button
+                        onClick={() => removeUser(u.id)}
+                        disabled={deletingId === u.id}
+                        style={{ background: "#D64933", color: "white", border: "none", borderRadius: 7, padding: "6px 10px", fontSize: 11.5, fontWeight: 600 }}
+                      >
+                        {deletingId === u.id ? "..." : "Confirmer"}
+                      </button>
+                      <button
+                        onClick={() => setConfirmId(null)}
+                        style={{ background: "white", border: "1px solid #DDD8CC", borderRadius: 7, padding: "6px 10px", fontSize: 11.5 }}
+                      >
+                        Annuler
+                      </button>
+                    </div>
+                  ) : (
+                    <button onClick={() => setConfirmId(u.id)} style={{ background: "none", border: "none", color: "#D64933", padding: 6 }} aria-label="Retirer">
+                      <Trash2 size={16} />
+                    </button>
+                  )
+                )}
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </div>
