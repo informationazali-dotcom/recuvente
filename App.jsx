@@ -276,6 +276,22 @@ export default function App() {
       .sort((a, b) => b.total - a.total);
   }, [orders]);
 
+  const produits = useMemo(() => {
+    const map = {};
+    ordersInRange.forEach((o) => {
+      const nomProduit = (o.produit || "Autre").split(" x")[0].trim();
+      if (!map[nomProduit]) map[nomProduit] = { nom: nomProduit, ventes: 0, revenus: 0, livrees: 0 };
+      map[nomProduit].ventes += 1;
+      map[nomProduit].revenus += Number(o.montant);
+      if (o.statut === "confirmee") map[nomProduit].livrees += 1;
+    });
+    return Object.values(map).sort((a, b) => b.ventes - a.ventes);
+  }, [ordersInRange]);
+
+  const meilleurProduit = produits[0] || null;
+  const produitPlusRentable = produits.length ? [...produits].sort((a, b) => b.revenus - a.revenus)[0] : null;
+  const meilleurLivreur = livreursStats.length ? [...livreursStats].sort((a, b) => (b.taux ?? -1) - (a.taux ?? -1))[0] : null;
+
   if (!loaded) {
     return (
       <div style={{ background: "#FAFAF7", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'IBM Plex Sans', sans-serif" }}>
@@ -417,6 +433,51 @@ export default function App() {
         <div style={{ margin: "14px 20px 0", background: "white", border: "1px solid #ECE8DC", borderRadius: 14, padding: "18px 20px 14px" }}>
           <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>Évolution des commandes</div>
           <EvolutionChart data={evolution} />
+        </div>
+      )}
+
+      {(meilleurProduit || meilleurLivreur) && (
+        <div style={{ margin: "14px 20px 0", display: "flex", flexDirection: "column", gap: 8 }}>
+          {meilleurProduit && (
+            <div style={{ background: "#EAF3DE", border: "1px solid #C7DDA3", borderRadius: 12, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 12.5, color: "#3B6D11" }}>🏆 Produit le plus vendu</span>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: "#3B6D11" }}>{meilleurProduit.nom} ({meilleurProduit.ventes})</span>
+            </div>
+          )}
+          {produitPlusRentable && produitPlusRentable.nom !== meilleurProduit?.nom && (
+            <div style={{ background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 12, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 12.5, color: "#8A6412" }}>💰 Produit le plus rentable</span>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: "#8A6412" }}>{produitPlusRentable.nom}</span>
+            </div>
+          )}
+          {meilleurLivreur && meilleurLivreur.total > 0 && (
+            <div style={{ background: "#EAF7F1", border: "1px solid #C7E8D6", borderRadius: 12, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 12.5, color: "#1F9D6E" }}>🚀 Livreur le plus performant</span>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: "#1F9D6E" }}>{meilleurLivreur.nom} ({meilleurLivreur.taux}%)</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {produits.length > 0 && (
+        <div style={{ margin: "14px 20px 0", background: "white", border: "1px solid #ECE8DC", borderRadius: 14, padding: "18px 20px 14px" }}>
+          <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 12 }}>Produits (période sélectionnée)</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {produits.slice(0, 6).map((p, i) => {
+              const maxV = produits[0].ventes || 1;
+              return (
+                <div key={i}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 3 }}>
+                    <span>{p.nom}</span>
+                    <span style={{ fontWeight: 600 }}>{p.ventes} · {formatFCFA(p.revenus)}</span>
+                  </div>
+                  <div style={{ background: "#ECE8DC", borderRadius: 999, height: 6, overflow: "hidden" }}>
+                    <div style={{ width: `${(p.ventes / maxV) * 100}%`, background: "#e8920a", height: "100%", borderRadius: 999 }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
