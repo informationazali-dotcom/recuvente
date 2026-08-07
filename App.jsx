@@ -142,10 +142,15 @@ export default function App() {
     };
   }, [ordersInRange]);
 
+  const [filterLivreur, setFilterLivreur] = useState("tous");
+  const [filterProduit, setFilterProduit] = useState("tous");
+
   const filtered = useMemo(() => {
-    if (filter === "toutes") return ordersInRange;
-    return ordersInRange.filter((o) => o.statut === filter);
-  }, [ordersInRange, filter]);
+    let r = filter === "toutes" ? ordersInRange : ordersInRange.filter((o) => o.statut === filter);
+    if (filterLivreur !== "tous") r = r.filter((o) => o.livreur === filterLivreur);
+    if (filterProduit !== "tous") r = r.filter((o) => (o.produit || "").split(" x")[0].trim() === filterProduit);
+    return r;
+  }, [ordersInRange, filter, filterLivreur, filterProduit]);
 
   const evolution = useMemo(() => {
     const map = {};
@@ -506,6 +511,35 @@ export default function App() {
           </button>
         ))}
       </div>
+
+      {(livreurs.length > 0 || produits.length > 0) && (
+        <div style={{ display: "flex", gap: 8, padding: "0 20px 8px" }}>
+          {livreurs.length > 0 && (
+            <select
+              value={filterLivreur}
+              onChange={(e) => setFilterLivreur(e.target.value)}
+              style={{ flex: 1, padding: "7px 8px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 12.5, background: "white", color: filterLivreur === "tous" ? "#8A9089" : "#16231F" }}
+            >
+              <option value="tous">Tous les livreurs</option>
+              {livreurs.map((l) => (
+                <option key={l.id} value={l.nom}>{l.nom}</option>
+              ))}
+            </select>
+          )}
+          {produits.length > 0 && (
+            <select
+              value={filterProduit}
+              onChange={(e) => setFilterProduit(e.target.value)}
+              style={{ flex: 1, padding: "7px 8px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 12.5, background: "white", color: filterProduit === "tous" ? "#8A9089" : "#16231F" }}
+            >
+              <option value="tous">Tous les produits</option>
+              {produits.map((p) => (
+                <option key={p.nom} value={p.nom}>{p.nom}</option>
+              ))}
+            </select>
+          )}
+        </div>
+      )}
 
       <div style={{ padding: "8px 20px", display: "flex", flexDirection: "column", gap: 6 }}>
         {filtered.length === 0 && (
