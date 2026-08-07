@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Phone, MessageCircle, MessageSquare, Plus, ChevronLeft, X, Check, Users, Truck, Trash2, Package } from "lucide-react";
+import { Phone, MessageCircle, MessageSquare, Plus, ChevronLeft, X, Check, Users, Truck, Trash2, Package, UserPlus, LogOut } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
 const STATUS = {
@@ -470,43 +470,43 @@ export default function App() {
 
       {view === "dashboard" && (
       <>
-      <div style={{ background: "#1a7a3c", color: "#FAFAF7", padding: "28px 20px 24px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-            <div style={{ width: 26, height: 26, borderRadius: 7, background: "rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-              <svg width="15" height="15" viewBox="0 0 100 100">
+      <div style={{ background: "#1a7a3c", color: "#FAFAF7", padding: "20px 16px 24px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+            <div style={{ width: 24, height: 24, borderRadius: 7, background: "rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <svg width="14" height="14" viewBox="0 0 100 100">
                 <polyline points="15,62 40,42 55,56 85,28" stroke="#e8920a" strokeWidth="11" fill="none" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </div>
-            <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 20, letterSpacing: "-0.01em" }}>
+            <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 17, letterSpacing: "-0.01em", whiteSpace: "nowrap" }}>
               RECU<span style={{ color: "#e8920a" }}>VENTE</span>
             </div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div className="rv-mobile-only-logout" style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
             {session.user.email === ADMIN_EMAIL && (
               <>
                 <button
                   onClick={() => setShowInvite(true)}
-                  className="rv-mobile-only-logout"
-                  style={{ background: "rgba(255,255,255,0.12)", border: "none", color: "white", fontSize: 11, padding: "4px 9px", borderRadius: 6, fontWeight: 500 }}
+                  aria-label="Inviter"
+                  style={{ background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: 7, borderRadius: 7, display: "flex" }}
                 >
-                  Inviter
+                  <UserPlus size={15} />
                 </button>
                 <button
                   onClick={() => setShowTeam(true)}
-                  className="rv-mobile-only-logout"
-                  style={{ background: "rgba(255,255,255,0.12)", border: "none", color: "white", fontSize: 11, padding: "4px 9px", borderRadius: 6, fontWeight: 500 }}
+                  aria-label="Équipe"
+                  style={{ background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: 7, borderRadius: 7, display: "flex" }}
                 >
-                  Équipe
+                  <Users size={15} />
                 </button>
               </>
             )}
             <button
               onClick={() => supabase.auth.signOut()}
-              className="rv-mobile-only-logout"
-              style={{ background: "rgba(255,255,255,0.12)", border: "none", color: "white", fontSize: 11, padding: "4px 9px", borderRadius: 6, fontWeight: 500 }}
+              aria-label="Déconnexion"
+              style={{ background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: 7, borderRadius: 7, display: "flex" }}
             >
-              Déconnexion
+              <LogOut size={15} />
             </button>
           </div>
         </div>
