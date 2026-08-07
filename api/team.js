@@ -1,4 +1,4 @@
- // Fonction Vercel pour gérer l'équipe : lister et supprimer des comptes
+// Fonction Vercel pour gérer l'équipe : lister et supprimer des comptes
 import { createClient } from "@supabase/supabase-js";
 
 const supabaseAdmin = createClient(
@@ -6,7 +6,21 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+async function verifyAdmin(req) {
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.replace("Bearer ", "");
+  if (!token) return false;
+  const { data, error } = await supabaseAdmin.auth.getUser(token);
+  if (error || !data.user) return false;
+  return data.user.email === process.env.VITE_ADMIN_EMAIL;
+}
+
 export default async function handler(req, res) {
+  const isAdmin = await verifyAdmin(req);
+  if (!isAdmin) {
+    return res.status(403).json({ error: "Accès refusé — réservé à l'administrateur." });
+  }
+
   try {
     if (req.method === "GET") {
       const { data, error } = await supabaseAdmin.auth.admin.listUsers();
