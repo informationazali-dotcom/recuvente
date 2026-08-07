@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { Phone, MessageCircle, MessageSquare, Plus, ChevronLeft, X, Check, Users, Truck, Trash2, Package, UserPlus, LogOut } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -60,6 +60,40 @@ export default function App() {
     return () => listener.subscription.unsubscribe();
   }, []);
 
+  const knownOrderIds = useRef(null);
+  const [notifPermission, setNotifPermission] = useState(
+    typeof Notification !== "undefined" ? Notification.permission : "unsupported"
+  );
+
+  function playNotifSound() {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.connect(g);
+      g.connect(ctx.destination);
+      o.type = "sine";
+      o.frequency.value = 880;
+      g.gain.setValueAtTime(0.15, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+      o.start();
+      o.stop(ctx.currentTime + 0.35);
+    } catch (e) {}
+  }
+
+  function notifyNewOrder(order) {
+    playNotifSound();
+    showToast(`🔔 Nouvelle commande — ${order.client}`);
+    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+      try {
+        new Notification("Nouvelle commande RecuVente", {
+          body: `${order.client} — ${order.produit} (${formatFCFA(order.montant)})`,
+          icon: "/icon-192.png",
+        });
+      } catch (e) {}
+    }
+  }
+
   async function loadOrders() {
     const { data, error } = await supabase
       .from("commandes")
@@ -68,7 +102,13 @@ export default function App() {
     if (error) {
       setError(error.message);
     } else {
-      setOrders(data || []);
+      const list = data || [];
+      if (knownOrderIds.current !== null) {
+        const nouvelles = list.filter((o) => !knownOrderIds.current.has(o.id));
+        nouvelles.forEach((o) => notifyNewOrder(o));
+      }
+      knownOrderIds.current = new Set(list.map((o) => o.id));
+      setOrders(list);
       setError(null);
     }
     setLoaded(true);
@@ -567,6 +607,18 @@ export default function App() {
           <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 13 }} />
           <span style={{ color: "#8A9089", fontSize: 12 }}>à</span>
           <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 13 }} />
+        </div>
+      )}
+
+      {notifPermission === "default" && (
+        <div style={{ margin: "14px 20px 0", background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 12, padding: "12px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+          <span style={{ fontSize: 12.5, color: "#8A6412" }}>🔔 Active les notifications pour être alerté des nouvelles commandes</span>
+          <button
+            onClick={() => Notification.requestPermission().then((p) => setNotifPermission(p))}
+            style={{ background: "#e8920a", color: "#16231F", border: "none", borderRadius: 8, padding: "7px 12px", fontSize: 12.5, fontWeight: 700, flexShrink: 0 }}
+          >
+            Activer
+          </button>
         </div>
       )}
 
