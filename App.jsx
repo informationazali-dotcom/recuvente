@@ -81,6 +81,38 @@ export default function App() {
     return orders.filter((o) => o.statut === filter);
   }, [orders, filter]);
 
+  const groupedByDay = useMemo(() => {
+    const groups = {};
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    filtered.forEach((o) => {
+      const d = new Date(o.created_at);
+      const dayKey = d.toISOString().slice(0, 10);
+      if (!groups[dayKey]) {
+        const dDate = new Date(d);
+        dDate.setHours(0, 0, 0, 0);
+        let label;
+        if (dDate.getTime() === today.getTime()) label = "Aujourd'hui";
+        else if (dDate.getTime() === yesterday.getTime()) label = "Hier";
+        else
+          label = d.toLocaleDateString("fr-FR", {
+            weekday: "long",
+            day: "numeric",
+            month: "long",
+          });
+        groups[dayKey] = { label, orders: [] };
+      }
+      groups[dayKey].orders.push(o);
+    });
+
+    return Object.entries(groups)
+      .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+      .map(([key, val]) => val);
+  }, [filtered]);
+
   async function updateStatus(id, statut) {
     const current = orders.find((o) => o.id === id);
     const recupere = statut === "confirmee" && current?.statut === "echouee" ? true : current?.recupere;
@@ -137,17 +169,17 @@ export default function App() {
         button { font-family: inherit; cursor: pointer; }
       `}</style>
 
-      <div style={{ background: "#0F3D3E", color: "#FAFAF7", padding: "28px 20px 24px" }}>
+      <div style={{ background: "#1a7a3c", color: "#FAFAF7", padding: "28px 20px 24px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
           <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 20, letterSpacing: "-0.01em" }}>
-            RECU<span style={{ color: "#E8A93D" }}>VENTE</span>
+            RECU<span style={{ color: "#e8920a" }}>VENTE</span>
           </div>
           <div style={{ fontSize: 12, opacity: 0.7 }}>Azali Express</div>
         </div>
 
         <div style={{ marginTop: 22 }}>
           <div style={{ fontSize: 12, opacity: 0.75, letterSpacing: "0.04em", textTransform: "uppercase" }}>Argent récupéré</div>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 38, marginTop: 4, color: "#E8A93D" }}>
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 38, marginTop: 4, color: "#e8920a" }}>
             {formatFCFA(stats.recupere)}
           </div>
         </div>
@@ -181,8 +213,8 @@ export default function App() {
             style={{
               padding: "7px 14px",
               borderRadius: 999,
-              border: "1px solid " + (filter === f.key ? "#0F3D3E" : "#DDD8CC"),
-              background: filter === f.key ? "#0F3D3E" : "white",
+              border: "1px solid " + (filter === f.key ? "#1a7a3c" : "#DDD8CC"),
+              background: filter === f.key ? "#1a7a3c" : "white",
               color: filter === f.key ? "white" : "#16231F",
               fontSize: 13,
               fontWeight: 500,
@@ -194,44 +226,65 @@ export default function App() {
         ))}
       </div>
 
-      <div style={{ padding: "8px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ padding: "8px 20px", display: "flex", flexDirection: "column", gap: 6 }}>
         {filtered.length === 0 && (
           <div style={{ textAlign: "center", padding: "40px 0", color: "#8A9089", fontSize: 14 }}>
             Aucune commande dans ce filtre.
           </div>
         )}
-        {filtered.map((o) => {
-          const s = STATUS[o.statut];
-          return (
-            <button
-              key={o.id}
-              onClick={() => setSelected(o)}
+        {groupedByDay.map((group, gi) => (
+          <div key={gi} style={{ marginBottom: 8 }}>
+            <div
               style={{
-                textAlign: "left",
-                background: "white",
-                border: "1px solid #ECE8DC",
-                borderLeft: `4px solid ${s.color}`,
-                borderRadius: 10,
-                padding: "12px 14px",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
+                fontSize: 12.5,
+                fontWeight: 700,
+                color: "#1a7a3c",
+                textTransform: "capitalize",
+                padding: "10px 2px 8px",
+                position: "sticky",
+                top: 0,
+                background: "#FAFAF7",
+                zIndex: 5,
               }}
             >
-              <div>
-                <div style={{ fontWeight: 600, fontSize: 14.5 }}>{o.client}</div>
-                <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{o.produit} · {o.zone}</div>
-                <div style={{ fontSize: 11.5, color: s.color, marginTop: 4, fontWeight: 500 }}>{o.derniere_tentative}</div>
-              </div>
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 15 }}>{formatFCFA(o.montant)}</div>
-                <div style={{ fontSize: 11, marginTop: 4, padding: "2px 8px", borderRadius: 999, background: s.bg, color: s.color, display: "inline-block", fontWeight: 500 }}>
-                  {s.label}
-                </div>
-              </div>
-            </button>
-          );
-        })}
+              {group.label} <span style={{ color: "#8A9089", fontWeight: 500 }}>({group.orders.length})</span>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {group.orders.map((o) => {
+                const s = STATUS[o.statut];
+                return (
+                  <button
+                    key={o.id}
+                    onClick={() => setSelected(o)}
+                    style={{
+                      textAlign: "left",
+                      background: "white",
+                      border: "1px solid #ECE8DC",
+                      borderLeft: `4px solid ${s.color}`,
+                      borderRadius: 10,
+                      padding: "12px 14px",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 14.5 }}>{o.client}</div>
+                      <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{o.produit} · {o.zone}</div>
+                      <div style={{ fontSize: 11.5, color: s.color, marginTop: 4, fontWeight: 500 }}>{o.derniere_tentative}</div>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 15 }}>{formatFCFA(o.montant)}</div>
+                      <div style={{ fontSize: 11, marginTop: 4, padding: "2px 8px", borderRadius: 999, background: s.bg, color: s.color, display: "inline-block", fontWeight: 500 }}>
+                        {s.label}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </div>
 
       <button
@@ -243,7 +296,7 @@ export default function App() {
           width: 52,
           height: 52,
           borderRadius: "50%",
-          background: "#0F3D3E",
+          background: "#1a7a3c",
           color: "white",
           border: "none",
           display: "flex",
@@ -286,7 +339,7 @@ function OrderDetail({ order, onClose, onStatus }) {
         <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: 14, marginBottom: 14 }}>
           <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.04em" }}>Commande</div>
           <div style={{ fontWeight: 600, marginTop: 2 }}>{order.produit}</div>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 20, marginTop: 6, color: "#0F3D3E" }}>{formatFCFA(order.montant)}</div>
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 20, marginTop: 6, color: "#1a7a3c" }}>{formatFCFA(order.montant)}</div>
         </div>
 
         <div style={{ marginBottom: 14 }}>
@@ -324,7 +377,7 @@ function OrderDetail({ order, onClose, onStatus }) {
           <a href={waLink(order)} target="_blank" rel="noopener noreferrer" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, background: "#1F9D6E", color: "white", padding: "12px 0", borderRadius: 10, fontWeight: 600, fontSize: 14, textDecoration: "none" }}>
             <MessageCircle size={17} /> WhatsApp
           </a>
-          <a href={`sms:${order.tel}?body=${encodeURIComponent(smsMsg(order))}`} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, background: "#0F3D3E", color: "white", padding: "12px 0", borderRadius: 10, fontWeight: 600, fontSize: 14, textDecoration: "none" }}>
+          <a href={`sms:${order.tel}?body=${encodeURIComponent(smsMsg(order))}`} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, background: "#1a7a3c", color: "white", padding: "12px 0", borderRadius: 10, fontWeight: 600, fontSize: 14, textDecoration: "none" }}>
             <MessageSquare size={17} /> SMS
           </a>
           <a href={`tel:${order.tel}`} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, background: "white", border: "1px solid #DDD8CC", color: "#16231F", padding: "12px 18px", borderRadius: 10, fontWeight: 600, fontSize: 14, textDecoration: "none" }}>
@@ -365,7 +418,7 @@ function AddOrder({ onClose, onAdd }) {
         <button
           disabled={!canSubmit}
           onClick={() => canSubmit && onAdd(form)}
-          style={{ width: "100%", marginTop: 6, padding: "13px 0", borderRadius: 10, border: "none", background: canSubmit ? "#0F3D3E" : "#DDD8CC", color: "white", fontWeight: 600, fontSize: 14.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+          style={{ width: "100%", marginTop: 6, padding: "13px 0", borderRadius: 10, border: "none", background: canSubmit ? "#1a7a3c" : "#DDD8CC", color: "white", fontWeight: 600, fontSize: 14.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
         >
           <Check size={17} /> Ajouter la commande
         </button>
