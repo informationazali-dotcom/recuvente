@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Phone, MessageCircle, MessageSquare, Plus, ChevronLeft, X, Check, Users, Truck, Trash2 } from "lucide-react";
+import { Phone, MessageCircle, MessageSquare, Plus, ChevronLeft, X, Check, Users, Truck, Trash2, Package } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
 const STATUS = {
