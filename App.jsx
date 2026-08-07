@@ -1050,6 +1050,29 @@ function ClientDetail({ client, onClose, onSelectOrder }) {
         </div>
         <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 16 }}>{client.tel} · {client.zone}</div>
 
+        <div style={{ display: "flex", gap: 10, marginBottom: 18 }}>
+          <a
+            href={`https://wa.me/${cleanPhoneForWhatsApp(client.tel)}?text=${encodeURIComponent(`Bonjour ${client.nom.split(" ")[0]} 👋, c'est Azali Express. Comment pouvons-nous vous aider ?`)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, background: "#1F9D6E", color: "white", padding: "11px 0", borderRadius: 10, fontWeight: 600, fontSize: 13.5, textDecoration: "none" }}
+          >
+            <MessageCircle size={16} /> WhatsApp
+          </a>
+          <a
+            href={`sms:${client.tel}?body=${encodeURIComponent(`Azali Express: Bonjour ${client.nom.split(" ")[0]}, comment pouvons-nous vous aider ?`)}`}
+            style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, background: "#1a7a3c", color: "white", padding: "11px 0", borderRadius: 10, fontWeight: 600, fontSize: 13.5, textDecoration: "none" }}
+          >
+            <MessageSquare size={16} /> SMS
+          </a>
+          <a
+            href={`tel:${client.tel}`}
+            style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, background: "white", border: "1px solid #DDD8CC", color: "#16231F", padding: "11px 16px", borderRadius: 10, fontWeight: 600, fontSize: 13.5, textDecoration: "none" }}
+          >
+            <Phone size={16} />
+          </a>
+        </div>
+
         <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 8 }}>
           Historique des commandes ({client.commandes.length})
         </div>
