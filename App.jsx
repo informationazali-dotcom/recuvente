@@ -34,6 +34,7 @@ function smsMsg(order) {
 }
 
 export default function App() {
+  const [session, setSession] = useState(undefined);
   const [orders, setOrders] = useState([]);
   const [livreurs, setLivreurs] = useState([]);
   const [view, setView] = useState("dashboard");
@@ -48,6 +49,12 @@ export default function App() {
   const [datePreset, setDatePreset] = useState("mois");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
+    return () => listener.subscription.unsubscribe();
+  }, []);
 
   async function loadOrders() {
     const { data, error } = await supabase
@@ -297,6 +304,18 @@ export default function App() {
   const produitPlusRentable = produits.length ? [...produits].sort((a, b) => b.revenus - a.revenus)[0] : null;
   const meilleurLivreur = livreursStats.length ? [...livreursStats].sort((a, b) => (b.taux ?? -1) - (a.taux ?? -1))[0] : null;
 
+  if (session === undefined) {
+    return (
+      <div style={{ background: "#FAFAF7", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'IBM Plex Sans', sans-serif" }}>
+        Chargement…
+      </div>
+    );
+  }
+
+  if (!session) {
+    return <LoginScreen />;
+  }
+
   if (!loaded) {
     return (
       <div style={{ background: "#FAFAF7", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'IBM Plex Sans', sans-serif" }}>
@@ -345,6 +364,7 @@ export default function App() {
           .rv-app { padding-bottom: 0 !important; }
           .rv-bottomnav { display: none !important; }
           .rv-fab { display: none !important; }
+          .rv-mobile-only-logout { display: none !important; }
           .rv-sidebar {
             display: flex;
             position: fixed;
@@ -410,9 +430,18 @@ export default function App() {
         <div style={{ marginTop: "auto", padding: "0 12px" }}>
           <button
             onClick={() => (view === "livreurs" ? setShowAddLivreur(true) : setShowAdd(true))}
-            style={{ width: "100%", padding: "10px 0", borderRadius: 9, border: "none", background: "#e8920a", color: "#16231F", fontWeight: 700, fontSize: 13.5, display: view === "clients" ? "none" : "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+            style={{ width: "100%", padding: "10px 0", borderRadius: 9, border: "none", background: "#e8920a", color: "#16231F", fontWeight: 700, fontSize: 13.5, display: view === "clients" ? "none" : "flex", alignItems: "center", justifyContent: "center", gap: 6, marginBottom: 8 }}
           >
             <Plus size={16} /> Ajouter
+          </button>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginBottom: 8, padding: "0 2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {session.user.email}
+          </div>
+          <button
+            onClick={() => supabase.auth.signOut()}
+            style={{ width: "100%", padding: "8px 0", borderRadius: 9, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "rgba(255,255,255,0.6)", fontWeight: 500, fontSize: 12.5 }}
+          >
+            Se déconnecter
           </button>
         </div>
       </div>
@@ -433,7 +462,16 @@ export default function App() {
               RECU<span style={{ color: "#e8920a" }}>VENTE</span>
             </div>
           </div>
-          <div style={{ fontSize: 12, opacity: 0.7 }}>Azali Express</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ fontSize: 12, opacity: 0.7 }}>Azali Express</div>
+            <button
+              onClick={() => supabase.auth.signOut()}
+              className="rv-mobile-only-logout"
+              style={{ background: "rgba(255,255,255,0.12)", border: "none", color: "white", fontSize: 11, padding: "4px 9px", borderRadius: 6, fontWeight: 500 }}
+            >
+              Déconnexion
+            </button>
+          </div>
         </div>
 
         <div style={{ marginTop: 22 }}>
@@ -1198,6 +1236,100 @@ function AddLivreur({ onClose, onAdd }) {
         >
           <Check size={17} /> Ajouter le livreur
         </button>
+      </div>
+    </div>
+  );
+}
+
+function LoginScreen() {
+  const [mode, setMode] = useState("signin");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [info, setInfo] = useState("");
+
+  async function submit() {
+    setErrorMsg("");
+    setInfo("");
+    if (!email || !password) {
+      setErrorMsg("Remplis email et mot de passe.");
+      return;
+    }
+    setLoading(true);
+    if (mode === "signin") {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) setErrorMsg(error.message === "Invalid login credentials" ? "Email ou mot de passe incorrect." : error.message);
+    } else {
+      const { error } = await supabase.auth.signUp({ email, password });
+      if (error) {
+        setErrorMsg(error.message);
+      } else {
+        setInfo("Compte créé. Vérifie ta boîte mail si une confirmation est demandée, sinon tu peux te connecter directement.");
+        setMode("signin");
+      }
+    }
+    setLoading(false);
+  }
+
+  return (
+    <div style={{ background: "#FAFAF7", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'IBM Plex Sans', sans-serif", padding: 20 }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,700&family=IBM+Plex+Sans:wght@400;500;600&display=swap');`}</style>
+      <div style={{ width: "100%", maxWidth: 360 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 9, marginBottom: 28 }}>
+          <div style={{ width: 30, height: 30, borderRadius: 8, background: "#1a7a3c", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <svg width="17" height="17" viewBox="0 0 100 100">
+              <polyline points="15,62 40,42 55,56 85,28" stroke="#e8920a" strokeWidth="11" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </div>
+          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 22 }}>
+            RECU<span style={{ color: "#e8920a" }}>VENTE</span>
+          </div>
+        </div>
+
+        <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 16, padding: 26 }}>
+          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 18, marginBottom: 4 }}>
+            {mode === "signin" ? "Connexion" : "Créer un compte"}
+          </div>
+          <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 20 }}>
+            {mode === "signin" ? "Accède à ton espace Azali Express" : "Réservé à l'équipe Azali Express"}
+          </div>
+
+          <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4 }}>Email</label>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, marginBottom: 14 }}
+          />
+
+          <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4 }}>Mot de passe</label>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && submit()}
+            style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, marginBottom: 16 }}
+          />
+
+          {errorMsg && <div style={{ background: "#FBEAE6", color: "#D64933", fontSize: 12.5, padding: "8px 10px", borderRadius: 8, marginBottom: 12 }}>{errorMsg}</div>}
+          {info && <div style={{ background: "#EAF3DE", color: "#3B6D11", fontSize: 12.5, padding: "8px 10px", borderRadius: 8, marginBottom: 12 }}>{info}</div>}
+
+          <button
+            onClick={submit}
+            disabled={loading}
+            style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none", background: "#1a7a3c", color: "white", fontWeight: 700, fontSize: 14.5, opacity: loading ? 0.6 : 1 }}
+          >
+            {loading ? "..." : mode === "signin" ? "Se connecter" : "Créer le compte"}
+          </button>
+
+          <button
+            onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setErrorMsg(""); setInfo(""); }}
+            style={{ width: "100%", padding: "10px 0", background: "none", border: "none", color: "#6B7168", fontSize: 12.5, marginTop: 10 }}
+          >
+            {mode === "signin" ? "Pas encore de compte ? En créer un" : "Déjà un compte ? Se connecter"}
+          </button>
+        </div>
       </div>
     </div>
   );
