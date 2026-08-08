@@ -2951,37 +2951,111 @@ function CloserPortal({ closer, orders, relanceCountByOrder, onStatus, onResched
     { key: "dejaTraitees", title: "✅ Déjà relancées récemment", items: todo.dejaTraitees, color: "#6B7168" },
   ];
 
+  const montantRecupere = todo.confirmees.reduce((s, o) => s + Number(o.montant), 0);
+  const montantARisque = orders.filter((o) => o.statut === "en_cours" || o.statut === "echouee").reduce((s, o) => s + Number(o.montant), 0);
+  const tauxConfirmation = orders.length ? Math.round((todo.confirmees.length / orders.length) * 100) : 0;
+
   return (
     <div style={{ background: "#FAFAF7", minHeight: "100vh", fontFamily: "'IBM Plex Sans', sans-serif", color: "#16231F", paddingBottom: 20 }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');`}</style>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');
+        button { font-family: inherit; cursor: pointer; transition: transform 0.12s ease; }
+        button:active { transform: scale(0.97); }
+        .rv-mesh-blob { position: absolute; border-radius: 50%; filter: blur(40px); pointer-events: none; }
+        .rv-mesh-1 { width: 180px; height: 180px; background: radial-gradient(circle, rgba(232,146,10,0.45) 0%, rgba(232,146,10,0) 70%); top: -60px; right: -40px; animation: rvMeshFloat1 9s ease-in-out infinite; }
+        .rv-mesh-2 { width: 140px; height: 140px; background: radial-gradient(circle, rgba(127,214,163,0.4) 0%, rgba(127,214,163,0) 70%); bottom: -50px; left: 10%; animation: rvMeshFloat2 11s ease-in-out infinite; }
+        .rv-mesh-3 { width: 110px; height: 110px; background: radial-gradient(circle, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0) 70%); top: 20%; right: 25%; animation: rvMeshFloat3 7s ease-in-out infinite; }
+        @keyframes rvMeshFloat1 { 0%, 100% { transform: translate(0,0) scale(1); } 50% { transform: translate(-20px,20px) scale(1.15); } }
+        @keyframes rvMeshFloat2 { 0%, 100% { transform: translate(0,0) scale(1); } 50% { transform: translate(25px,-15px) scale(1.1); } }
+        @keyframes rvMeshFloat3 { 0%, 100% { transform: translate(0,0) scale(1); opacity: 0.6; } 50% { transform: translate(-15px,-10px) scale(1.3); opacity: 1; } }
+        .rv-wave-1 { animation: rvWaveDrift 9s linear infinite; }
+        .rv-wave-2 { animation: rvWaveDrift 14s linear infinite reverse; }
+        .rv-wave-3 { animation: rvWaveDrift 20s linear infinite; }
+        @keyframes rvWaveDrift { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+        .rv-glow { animation: rvGlowBreathe 4s ease-in-out infinite; }
+        @keyframes rvGlowBreathe { 0%, 100% { opacity: 0.5; transform: scale(1); } 50% { opacity: 1; transform: scale(1.15); } }
+        .rv-3d-card { animation: rv3DFloat 6s ease-in-out infinite; transform-style: preserve-3d; }
+        @keyframes rv3DFloat {
+          0%, 100% { transform: rotateX(0deg) rotateY(0deg) translateZ(0); }
+          25% { transform: rotateX(3deg) rotateY(-4deg) translateZ(6px); }
+          50% { transform: rotateX(0deg) rotateY(0deg) translateZ(0); }
+          75% { transform: rotateX(-3deg) rotateY(4deg) translateZ(6px); }
+        }
+        .rv-glass-card { position: relative; overflow: hidden; border-radius: 12px; padding: 11px 13px; background: linear-gradient(155deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.06) 60%, rgba(255,255,255,0.1) 100%); border: 1px solid rgba(255,255,255,0.25); box-shadow: 0 4px 14px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.3), inset 0 -1px 0 rgba(0,0,0,0.08); }
+        .rv-glass-shine { position: absolute; top: -50%; left: -60%; width: 60%; height: 200%; background: linear-gradient(120deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.35) 50%, rgba(255,255,255,0) 100%); transform: rotate(20deg); animation: rvShineSweep 3.5s ease-in-out infinite; pointer-events: none; }
+        @keyframes rvShineSweep { 0% { left: -60%; } 35%, 100% { left: 140%; } }
+        .rv-livedot { animation: rvPulseDot 2s ease-in-out infinite; }
+        @keyframes rvPulseDot { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+      `}</style>
 
-      <div style={{ background: "#1a7a3c", color: "white", padding: "24px 20px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 18 }}>
-          <div style={{ width: 26, height: 26, borderRadius: 7, background: "rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <svg width="15" height="15" viewBox="0 0 100 100">
-              <polyline points="15,62 40,42 55,56 85,28" stroke="#e8920a" strokeWidth="11" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </div>
-          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 17 }}>
-            RECU<span style={{ color: "#e8920a" }}>VENTE</span>
-          </div>
-          <button
-            onClick={() => supabase.auth.signOut()}
-            style={{ marginLeft: "auto", background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: "6px 12px", borderRadius: 7, fontSize: 12, fontWeight: 500 }}
-          >
-            Déconnexion
-          </button>
+      <div style={{ background: "#1a7a3c", color: "white", padding: "20px 16px 24px", position: "relative", overflow: "hidden" }}>
+        <div className="rv-mesh-blob rv-mesh-1" />
+        <div className="rv-mesh-blob rv-mesh-2" />
+        <div className="rv-mesh-blob rv-mesh-3" />
+
+        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 90, overflow: "hidden", pointerEvents: "none" }}>
+          <svg className="rv-wave-1" viewBox="0 0 400 60" preserveAspectRatio="none" style={{ position: "absolute", bottom: -5, width: "200%", height: 70 }}>
+            <path d="M0,30 C40,10 80,50 120,30 C160,10 200,50 240,30 C280,10 320,50 360,30 C380,20 390,25 400,30 L400,60 L0,60 Z" fill="rgba(232,146,10,0.55)" />
+          </svg>
+          <svg className="rv-wave-2" viewBox="0 0 400 60" preserveAspectRatio="none" style={{ position: "absolute", bottom: -8, width: "200%", height: 60 }}>
+            <path d="M0,25 C50,45 90,5 140,25 C190,45 230,5 280,25 C330,45 370,5 400,20 L400,60 L0,60 Z" fill="rgba(255,255,255,0.4)" />
+          </svg>
+          <svg className="rv-wave-3" viewBox="0 0 400 60" preserveAspectRatio="none" style={{ position: "absolute", bottom: -3, width: "200%", height: 50 }}>
+            <path d="M0,35 C60,15 100,45 160,25 C220,5 260,45 320,25 C360,10 380,30 400,25 L400,60 L0,60 Z" fill="rgba(248,180,60,0.4)" />
+          </svg>
         </div>
-        <div style={{ fontSize: 13, opacity: 0.8 }}>Bonjour</div>
-        <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 22 }}>{closer.nom}</div>
-        <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-          <div style={{ flex: 1, background: "rgba(255,255,255,0.1)", borderRadius: 10, padding: "10px 12px" }}>
-            <div style={{ fontSize: 11, opacity: 0.75 }}>À traiter</div>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 20 }}>{todo.total}</div>
+
+        <div style={{ position: "relative", zIndex: 1 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ width: 24, height: 24, borderRadius: 7, background: "rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <svg width="14" height="14" viewBox="0 0 100 100">
+                <polyline points="15,62 40,42 55,56 85,28" stroke="#e8920a" strokeWidth="11" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
+            <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 17 }}>
+              RECU<span style={{ color: "#e8920a" }}>VENTE</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 4, opacity: 0.65 }}>
+              <span className="rv-livedot" style={{ width: 6, height: 6, borderRadius: "50%", background: "#7fd6a3", display: "inline-block" }} />
+              <span style={{ fontSize: 9.5, fontWeight: 500 }}>EN DIRECT</span>
+            </div>
+            <button
+              onClick={() => supabase.auth.signOut()}
+              style={{ marginLeft: "auto", background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: "6px 12px", borderRadius: 7, fontSize: 12, fontWeight: 500 }}
+            >
+              Déconnexion
+            </button>
           </div>
-          <div style={{ flex: 1, background: "rgba(255,255,255,0.1)", borderRadius: 10, padding: "10px 12px" }}>
-            <div style={{ fontSize: 11, opacity: 0.75 }}>Confirmées</div>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 20 }}>{todo.confirmees.length}</div>
+
+          <div style={{ marginTop: 18, fontSize: 13, opacity: 0.8 }}>Bonjour</div>
+          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 22 }}>{closer.nom}</div>
+
+          <div style={{ marginTop: 16, perspective: "800px" }}>
+            <div className="rv-3d-card" style={{ position: "relative", padding: "12px 14px", borderRadius: 14, background: "linear-gradient(155deg, rgba(255,255,255,0.14) 0%, rgba(255,255,255,0.03) 70%)", border: "1px solid rgba(255,255,255,0.18)", boxShadow: "0 10px 24px rgba(0,0,0,0.2)" }}>
+              <div className="rv-glow" style={{ position: "absolute", top: -16, left: -16, width: 100, height: 100, borderRadius: "50%", background: "radial-gradient(circle, rgba(232,146,10,0.35) 0%, rgba(232,146,10,0) 70%)", pointerEvents: "none" }} />
+              <div style={{ fontSize: 11, opacity: 0.75, textTransform: "uppercase", letterSpacing: "0.04em", position: "relative" }}>Argent récupéré (mes commandes)</div>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 30, marginTop: 3, color: "#e8920a", position: "relative" }}>
+                {formatFCFA(montantRecupere)}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+            <div className="rv-glass-card" style={{ flex: 1 }}>
+              <div className="rv-glass-shine" />
+              <div style={{ fontSize: 10.5, opacity: 0.75, position: "relative" }}>À traiter</div>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 19, position: "relative" }}>{todo.total}</div>
+            </div>
+            <div className="rv-glass-card" style={{ flex: 1 }}>
+              <div className="rv-glass-shine" />
+              <div style={{ fontSize: 10.5, opacity: 0.75, position: "relative" }}>Confirmées</div>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 19, position: "relative" }}>{todo.confirmees.length}</div>
+            </div>
+            <div className="rv-glass-card" style={{ flex: 1 }}>
+              <div className="rv-glass-shine" />
+              <div style={{ fontSize: 10.5, opacity: 0.75, position: "relative" }}>Taux</div>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 19, position: "relative" }}>{tauxConfirmation}%</div>
+            </div>
           </div>
         </div>
       </div>
