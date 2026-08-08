@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { Phone, MessageCircle, MessageSquare, Plus, ChevronLeft, X, Check, Users, Truck, Trash2, Package, UserPlus, LogOut } from "lucide-react";
+import { Phone, MessageCircle, MessageSquare, Plus, ChevronLeft, X, Check, Users, Truck, Trash2, Package, UserPlus, LogOut, ListChecks } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
 const STATUS = {
@@ -63,7 +63,7 @@ export default function App() {
   const [session, setSession] = useState(undefined);
   const [orders, setOrders] = useState([]);
   const [livreurs, setLivreurs] = useState([]);
-  const [view, setView] = useState("dashboard");
+  const [view, setView] = useState("today");
   const [filter, setFilter] = useState("toutes");
   const [selected, setSelected] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
@@ -168,12 +168,24 @@ export default function App() {
     if (!error) setLivreurs(data || []);
   }
 
+  const [allRelances, setAllRelances] = useState([]);
+
+  async function loadRelances() {
+    const { data, error } = await supabase
+      .from("relances")
+      .select("commande_id, created_at")
+      .order("created_at", { ascending: false });
+    if (!error) setAllRelances(data || []);
+  }
+
   useEffect(() => {
     loadOrders();
     loadLivreurs();
+    loadRelances();
     const interval = setInterval(() => {
       loadOrders();
       loadLivreurs();
+      loadRelances();
     }, 15000);
     return () => clearInterval(interval);
   }, []);
@@ -274,6 +286,40 @@ export default function App() {
     });
     return Object.values(map).filter((c) => c.echouees >= 3);
   }, [orders]);
+
+  const relanceCountByOrder = useMemo(() => {
+    const map = {};
+    const lastByOrder = {};
+    allRelances.forEach((r) => {
+      map[r.commande_id] = (map[r.commande_id] || 0) + 1;
+      if (!lastByOrder[r.commande_id] || new Date(r.created_at) > new Date(lastByOrder[r.commande_id])) {
+        lastByOrder[r.commande_id] = r.created_at;
+      }
+    });
+    return { count: map, last: lastByOrder };
+  }, [allRelances]);
+
+  const todoAujourdhui = useMemo(() => {
+    const today = new Date();
+    const todayStr = today.toISOString().slice(0, 10);
+    const now24hAgo = new Date(today.getTime() - 24 * 3600 * 1000);
+
+    const actives = orders.filter((o) => o.statut === "en_cours" || o.statut === "echouee");
+
+    const aRelivrer = actives.filter((o) => o.date_relivraison === todayStr);
+
+    const jamaisContactees = actives.filter((o) => !relanceCountByOrder.count[o.id] && aRelivrer.every((a) => a.id !== o.id));
+
+    const sansNouvelles = actives.filter((o) => {
+      if (aRelivrer.some((a) => a.id === o.id)) return false;
+      if (jamaisContactees.some((j) => j.id === o.id)) return false;
+      const last = relanceCountByOrder.last[o.id];
+      if (!last) return false;
+      return new Date(last) < now24hAgo;
+    });
+
+    return { aRelivrer, jamaisContactees, sansNouvelles, total: aRelivrer.length + jamaisContactees.length + sansNouvelles.length };
+  }, [orders, relanceCountByOrder]);
 
   const [filterLivreur, setFilterLivreur] = useState("tous");
   const [filterProduit, setFilterProduit] = useState("tous");
@@ -553,6 +599,7 @@ export default function App() {
           </div>
         </div>
         {[
+          { key: "today", label: "Aujourd'hui", icon: ListChecks },
           { key: "dashboard", label: "Commandes", icon: Package },
           { key: "clients", label: "Clients", icon: Users },
           { key: "livreurs", label: "Livreurs", icon: Truck },
@@ -968,6 +1015,12 @@ export default function App() {
       </>
       )}
 
+      {view === "today" && (
+        <div className="rv-fadein">
+          <TodayView todo={todoAujourdhui} onSelectOrder={(o) => { setView("dashboard"); setSelected(o); }} />
+        </div>
+      )}
+
       {view === "clients" && (
         <div className="rv-fadein">
           <ClientsView clients={clients} onSelect={setSelectedClient} />
@@ -998,6 +1051,7 @@ export default function App() {
         }}
       >
         {[
+          { key: "today", label: "Aujourd'hui", icon: ListChecks },
           { key: "dashboard", label: "Commandes", icon: Package },
           { key: "clients", label: "Clients", icon: Users },
           { key: "livreurs", label: "Livreurs", icon: Truck },
@@ -1835,6 +1889,55 @@ function RelancesHistorique({ orderId }) {
             </div>
           ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+function TodayView({ todo, onSelectOrder }) {
+  const sections = [
+    { key: "aRelivrer", title: "📅 À relivrer aujourd'hui", items: todo.aRelivrer, color: "#1a7a3c", bg: "#EAF3DE" },
+    { key: "jamaisContactees", title: "🆕 Jamais contactées", items: todo.jamaisContactees, color: "#8A6412", bg: "#FBF3E3" },
+    { key: "sansNouvelles", title: "⏰ Sans nouvelles depuis 24h+", items: todo.sansNouvelles, color: "#D64933", bg: "#FBEAE6" },
+  ];
+
+  return (
+    <div style={{ padding: "20px 20px 8px" }}>
+      <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 22, marginBottom: 4 }}>Aujourd'hui</div>
+      <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 18 }}>
+        {todo.total > 0 ? `${todo.total} commande${todo.total > 1 ? "s" : ""} à traiter` : "Rien à traiter, tout est à jour ✅"}
+      </div>
+
+      {todo.total === 0 && (
+        <div style={{ textAlign: "center", padding: "50px 20px", color: "#8A9089" }}>
+          <div style={{ fontSize: 40, marginBottom: 10 }}>🎉</div>
+          <div style={{ fontSize: 14 }}>Aucune commande urgente pour le moment.</div>
+        </div>
+      )}
+
+      {sections.map((sec) =>
+        sec.items.length > 0 ? (
+          <div key={sec.key} style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color: sec.color }}>
+              {sec.title} ({sec.items.length})
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {sec.items.map((o) => (
+                <button
+                  key={o.id}
+                  onClick={() => onSelectOrder(o)}
+                  style={{ textAlign: "left", background: "white", border: "1px solid #ECE8DC", borderLeft: `4px solid ${sec.color}`, borderRadius: 10, padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 14.5 }}>{o.client}</div>
+                    <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{o.produit} · {o.tel}</div>
+                  </div>
+                  <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 14.5 }}>{formatFCFA(o.montant)}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null
       )}
     </div>
   );
