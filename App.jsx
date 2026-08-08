@@ -57,7 +57,25 @@ export default function App() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
     const { data: listener } = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
-    return () => listener.subscription.unsubscribe();
+
+    async function handleVisible() {
+      if (document.visibilityState === "visible") {
+        const { data, error } = await supabase.auth.refreshSession();
+        if (!error && data.session) {
+          setSession(data.session);
+          loadOrders();
+          loadLivreurs();
+        }
+      }
+    }
+    document.addEventListener("visibilitychange", handleVisible);
+    window.addEventListener("focus", handleVisible);
+
+    return () => {
+      listener.subscription.unsubscribe();
+      document.removeEventListener("visibilitychange", handleVisible);
+      window.removeEventListener("focus", handleVisible);
+    };
   }, []);
 
   const knownOrderIds = useRef(null);
@@ -94,12 +112,16 @@ export default function App() {
     }
   }
 
-  async function loadOrders() {
+  async function loadOrders(isRetry) {
     const { data, error } = await supabase
       .from("commandes")
       .select("*")
       .order("created_at", { ascending: false });
     if (error) {
+      if (!isRetry && (error.message || "").toLowerCase().includes("jwt")) {
+        const { data: refreshed } = await supabase.auth.refreshSession();
+        if (refreshed.session) return loadOrders(true);
+      }
       setError(error.message);
     } else {
       const list = data || [];
@@ -374,9 +396,23 @@ export default function App() {
         <div style={{ background: "#FBEAE6", border: "1px solid #F0B8AC", borderRadius: 12, padding: 16, color: "#D64933" }}>
           <strong>Connexion à la base de données impossible.</strong>
           <div style={{ fontSize: 13, marginTop: 6 }}>{error}</div>
-          <div style={{ fontSize: 13, marginTop: 10 }}>
-            Vérifie que VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY sont bien réglés dans les variables d'environnement.
-          </div>
+        </div>
+        <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
+          <button
+            onClick={async () => {
+              const { data } = await supabase.auth.refreshSession();
+              if (data.session) { setSession(data.session); loadOrders(); loadLivreurs(); }
+            }}
+            style={{ flex: 1, padding: "12px 0", borderRadius: 10, border: "none", background: "#1a7a3c", color: "white", fontWeight: 600, fontSize: 14 }}
+          >
+            Réessayer
+          </button>
+          <button
+            onClick={() => supabase.auth.signOut()}
+            style={{ flex: 1, padding: "12px 0", borderRadius: 10, border: "1px solid #DDD8CC", background: "white", color: "#16231F", fontWeight: 600, fontSize: 14 }}
+          >
+            Se reconnecter
+          </button>
         </div>
       </div>
     );
@@ -386,7 +422,10 @@ export default function App() {
     <div className="rv-app" style={{ background: "#FAFAF7", minHeight: "100vh", fontFamily: "'IBM Plex Sans', sans-serif", color: "#16231F", paddingBottom: 76 }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');
+        html, body { overflow-x: hidden; width: 100%; margin: 0; padding: 0; overscroll-behavior-y: contain; }
+        #root { overflow-x: hidden; width: 100%; }
         * { box-sizing: border-box; }
+        .rv-app { overflow-x: hidden; width: 100%; position: relative; }
         button { font-family: inherit; cursor: pointer; transition: transform 0.12s ease, opacity 0.12s ease, background 0.15s ease, border-color 0.15s ease; }
         button:active { transform: scale(0.97); }
         .rv-sidebar button, .rv-bottomnav button { transition: background 0.18s ease, color 0.18s ease; }
