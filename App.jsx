@@ -76,7 +76,9 @@ export default function App() {
   const [showCampagne, setShowCampagne] = useState(false);
   const [celebration, setCelebration] = useState(null);
   const [selectedClient, setSelectedClient] = useState(null);
-  const [loaded, setLoaded] = useState(false);
+  const [ordersLoaded, setOrdersLoaded] = useState(false);
+  const [livreursLoaded, setLivreursLoaded] = useState(false);
+  const [closersLoaded, setClosersLoaded] = useState(false);
   const [toast, setToast] = useState(null);
   const [error, setError] = useState(null);
   const [datePreset, setDatePreset] = useState("aujourdhui");
@@ -183,7 +185,7 @@ export default function App() {
       setOrders(list);
       setError(null);
     }
-    setLoaded(true);
+    setOrdersLoaded(true);
   }
 
   async function loadLivreurs() {
@@ -192,6 +194,7 @@ export default function App() {
       .select("*")
       .order("created_at", { ascending: false });
     if (!error) setLivreurs(data || []);
+    setLivreursLoaded(true);
   }
 
   async function loadClosers() {
@@ -200,6 +203,7 @@ export default function App() {
       .select("*")
       .order("created_at", { ascending: false });
     if (!error) setClosers(data || []);
+    setClosersLoaded(true);
   }
 
   const [allRelances, setAllRelances] = useState([]);
@@ -225,6 +229,8 @@ export default function App() {
     }, 15000);
     return () => clearInterval(interval);
   }, []);
+
+  const loaded = ordersLoaded && livreursLoaded && closersLoaded;
 
   function showToast(msg) {
     setToast(msg);
