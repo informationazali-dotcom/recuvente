@@ -1118,6 +1118,7 @@ export default function App() {
           livreurs={livreurs}
           onAssignLivreur={assignLivreur}
           onReschedule={rescheduleOrder}
+          onRelanceAdded={loadRelances}
         />
       )}
       {showAdd && <AddOrder onClose={() => setShowAdd(false)} onAdd={addOrder} />}
@@ -1209,7 +1210,7 @@ function StatusDonut({ livrees, enAttente, echouees }) {
   );
 }
 
-function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, onReschedule }) {
+function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, onReschedule, onRelanceAdded }) {
   return (
     <div className="rv-modal-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", zIndex: 50 }} onClick={onClose}>
       <div className="rv-modal-sheet" onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", maxHeight: "88vh", overflowY: "auto", borderRadius: "18px 18px 0 0", padding: "18px 20px 28px" }}>
@@ -1285,7 +1286,7 @@ function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, onRe
           )}
         </div>
 
-        <RelancesHistorique orderId={order.id} />
+        <RelancesHistorique orderId={order.id} onAdded={onRelanceAdded} />
 
         <div style={{ background: "#EAF7F1", border: "1px solid #CFEBDD", borderRadius: 12, padding: 14, marginBottom: 14 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#1F9D6E", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>
@@ -1823,7 +1824,7 @@ function TeamModal({ onClose, currentUserId }) {
   );
 }
 
-function RelancesHistorique({ orderId }) {
+function RelancesHistorique({ orderId, onAdded }) {
   const [relances, setRelances] = useState([]);
   const [note, setNote] = useState("");
   const [loading, setLoading] = useState(true);
@@ -1850,6 +1851,7 @@ function RelancesHistorique({ orderId }) {
     if (!error) {
       setNote("");
       await load();
+      if (onAdded) onAdded();
     }
     setAdding(false);
   }
