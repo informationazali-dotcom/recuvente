@@ -422,10 +422,8 @@ export default function App() {
     <div className="rv-app" style={{ background: "#FAFAF7", minHeight: "100vh", fontFamily: "'IBM Plex Sans', sans-serif", color: "#16231F", paddingBottom: 76 }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');
-        html, body { overflow-x: hidden; width: 100%; margin: 0; padding: 0; overscroll-behavior-y: contain; }
-        #root { overflow-x: hidden; width: 100%; }
         * { box-sizing: border-box; }
-        .rv-app { overflow-x: hidden; width: 100%; position: relative; }
+        .rv-app { width: 100%; position: relative; }
         button { font-family: inherit; cursor: pointer; transition: transform 0.12s ease, opacity 0.12s ease, background 0.15s ease, border-color 0.15s ease; }
         button:active { transform: scale(0.97); }
         .rv-sidebar button, .rv-bottomnav button { transition: background 0.18s ease, color 0.18s ease; }
