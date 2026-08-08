@@ -2079,14 +2079,25 @@ function BatchRelanceModal({ orders, onClose, onLog }) {
 
 function CampagneModal({ clients, onClose }) {
   const [message, setMessage] = useState("");
+  const [productLink, setProductLink] = useState("");
   const [started, setStarted] = useState(false);
   const [index, setIndex] = useState(0);
   const [sentCount, setSentCount] = useState(0);
 
+  const PRODUITS_RAPIDES = [
+    { nom: "Peineili Spray", url: "https://www.azaliexpress.com/products/peineili-spray" },
+    { nom: "Dongyitang", url: "https://www.azaliexpress.com/products/zalidongyitangbaumechauffantarticulations" },
+    { nom: "Azali Tisane", url: "https://www.azaliexpress.com/products/azali" },
+    { nom: "Tampons Éclat", url: "https://www.azaliexpress.com/products/tampons-nettoyants" },
+    { nom: "AirFlow", url: "https://www.azaliexpress.com/products/azali-airflow-1" },
+  ];
+
   const current = clients[index];
 
   function personalize(tpl, nom) {
-    return tpl.replace(/\{prenom\}/gi, (nom || "").split(" ")[0] || "");
+    let text = tpl.replace(/\{prenom\}/gi, (nom || "").split(" ")[0] || "");
+    if (productLink.trim()) text = text.trim() + "\n\n" + productLink.trim();
+    return text;
   }
 
   function send(type) {
@@ -2125,6 +2136,27 @@ function CampagneModal({ clients, onClose }) {
               placeholder="Ex: Bonjour {prenom} 👋, nouvelle promo chez Azali Express cette semaine : -20% sur tous les produits ! Réponds pour en profiter."
               style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid #DDD8CC", fontSize: 13.5, marginBottom: 14, resize: "vertical" }}
             />
+
+            <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 6 }}>Lien du produit (optionnel — WhatsApp affichera l'image automatiquement)</label>
+            <input
+              type="text"
+              value={productLink}
+              onChange={(e) => setProductLink(e.target.value)}
+              placeholder="https://www.azaliexpress.com/products/..."
+              style={{ width: "100%", padding: "9px 12px", borderRadius: 9, border: "1px solid #DDD8CC", fontSize: 13, marginBottom: 8 }}
+            />
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+              {PRODUITS_RAPIDES.map((p) => (
+                <button
+                  key={p.url}
+                  onClick={() => setProductLink(p.url)}
+                  style={{ fontSize: 11, padding: "5px 10px", borderRadius: 999, border: "1px solid " + (productLink === p.url ? "#1a7a3c" : "#DDD8CC"), background: productLink === p.url ? "#EAF3DE" : "white", color: productLink === p.url ? "#1a7a3c" : "#6B7168", fontWeight: 500 }}
+                >
+                  {p.nom}
+                </button>
+              ))}
+            </div>
+
             <button
               onClick={() => setStarted(true)}
               disabled={!message.trim() || clients.length === 0}
