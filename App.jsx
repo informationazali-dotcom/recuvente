@@ -308,17 +308,23 @@ export default function App() {
 
     const actives = orders.filter((o) => o.statut === "en_cours" || o.statut === "echouee");
 
-    const aRelivrer = actives.filter((o) => o.date_relivraison === todayStr);
+    const byMontant = (a, b) => Number(b.montant) - Number(a.montant);
 
-    const jamaisContactees = actives.filter((o) => !relanceCountByOrder.count[o.id] && aRelivrer.every((a) => a.id !== o.id));
+    const aRelivrer = actives.filter((o) => o.date_relivraison === todayStr).sort(byMontant);
 
-    const sansNouvelles = actives.filter((o) => {
-      if (aRelivrer.some((a) => a.id === o.id)) return false;
-      if (jamaisContactees.some((j) => j.id === o.id)) return false;
-      const last = relanceCountByOrder.last[o.id];
-      if (!last) return false;
-      return new Date(last) < now24hAgo;
-    });
+    const jamaisContactees = actives
+      .filter((o) => !relanceCountByOrder.count[o.id] && aRelivrer.every((a) => a.id !== o.id))
+      .sort(byMontant);
+
+    const sansNouvelles = actives
+      .filter((o) => {
+        if (aRelivrer.some((a) => a.id === o.id)) return false;
+        if (jamaisContactees.some((j) => j.id === o.id)) return false;
+        const last = relanceCountByOrder.last[o.id];
+        if (!last) return false;
+        return new Date(last) < now24hAgo;
+      })
+      .sort(byMontant);
 
     const total = aRelivrer.length + jamaisContactees.length + sansNouvelles.length;
     const montantTotal = [...aRelivrer, ...jamaisContactees, ...sansNouvelles].reduce((s, o) => s + Number(o.montant), 0);
