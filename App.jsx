@@ -14,6 +14,30 @@ function formatFCFA(n) {
   return Number(n).toLocaleString("fr-FR").replace(/,/g, " ") + " F";
 }
 
+function exportCSV(orders) {
+  const headers = ["Client", "Téléphone", "Produit", "Montant", "Zone", "Statut", "Livreur", "Date"];
+  const rows = orders.map((o) => [
+    o.client,
+    o.tel,
+    o.produit,
+    o.montant,
+    o.zone || "",
+    STATUS[o.statut]?.label || o.statut,
+    o.livreur || "",
+    new Date(o.created_at).toLocaleDateString("fr-FR"),
+  ]);
+  const csv = [headers, ...rows]
+    .map((row) => row.map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(";"))
+    .join("\n");
+  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `recuvente-export-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function scriptAppel(order) {
   return `Bonjour ${order.client.split(" ")[0]}, je vous appelle au sujet de votre commande "${order.produit}" d'un montant de ${formatFCFA(order.montant)}. Êtes-vous toujours disponible pour la réception ? Nous pouvons livrer dans les prochaines 24h.`;
 }
@@ -187,12 +211,29 @@ export default function App() {
     return { start, end };
   }, [datePreset, customStart, customEnd]);
 
+  const previousRange = useMemo(() => {
+    const duration = dateRange.end.getTime() - dateRange.start.getTime();
+    return { start: new Date(dateRange.start.getTime() - duration), end: dateRange.start };
+  }, [dateRange]);
+
   const ordersInRange = useMemo(() => {
     return orders.filter((o) => {
       const d = new Date(o.created_at);
       return d >= dateRange.start && d < dateRange.end;
     });
   }, [orders, dateRange]);
+
+  const ordersPreviousRange = useMemo(() => {
+    return orders.filter((o) => {
+      const d = new Date(o.created_at);
+      return d >= previousRange.start && d < previousRange.end;
+    });
+  }, [orders, previousRange]);
+
+  const chiffreAffairesPrecedent = useMemo(
+    () => ordersPreviousRange.reduce((sum, o) => sum + Number(o.montant), 0),
+    [ordersPreviousRange]
+  );
 
   const stats = useMemo(() => {
     const confirmees = ordersInRange.filter((o) => o.statut === "confirmee");
@@ -215,6 +256,25 @@ export default function App() {
     };
   }, [ordersInRange]);
 
+  const evolutionCA = useMemo(() => {
+    if (chiffreAffairesPrecedent === 0) return null;
+    return Math.round(((stats.chiffreAffaires - chiffreAffairesPrecedent) / chiffreAffairesPrecedent) * 100);
+  }, [stats.chiffreAffaires, chiffreAffairesPrecedent]);
+
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const clientsSuspects = useMemo(() => {
+    const map = {};
+    orders.forEach((o) => {
+      const key = o.tel;
+      if (!key) return;
+      if (!map[key]) map[key] = { tel: key, nom: o.client, echouees: 0, total: 0 };
+      map[key].total += 1;
+      if (o.statut === "echouee") map[key].echouees += 1;
+    });
+    return Object.values(map).filter((c) => c.echouees >= 3);
+  }, [orders]);
+
   const [filterLivreur, setFilterLivreur] = useState("tous");
   const [filterProduit, setFilterProduit] = useState("tous");
 
@@ -222,8 +282,12 @@ export default function App() {
     let r = filter === "toutes" ? ordersInRange : ordersInRange.filter((o) => o.statut === filter);
     if (filterLivreur !== "tous") r = r.filter((o) => o.livreur === filterLivreur);
     if (filterProduit !== "tous") r = r.filter((o) => (o.produit || "").split(" x")[0].trim() === filterProduit);
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      r = r.filter((o) => (o.client || "").toLowerCase().includes(q) || (o.tel || "").includes(q));
+    }
     return r;
-  }, [ordersInRange, filter, filterLivreur, filterProduit]);
+  }, [ordersInRange, filter, filterLivreur, filterProduit, searchQuery]);
 
   const evolution = useMemo(() => {
     const map = {};
@@ -318,6 +382,17 @@ export default function App() {
     }
     await loadOrders();
     if (selected && selected.id === orderId) setSelected((s) => ({ ...s, livreur: livreurNom }));
+  }
+
+  async function rescheduleOrder(orderId, date) {
+    const { error } = await supabase.from("commandes").update({ date_relivraison: date || null }).eq("id", orderId);
+    if (error) {
+      showToast("Erreur: " + error.message);
+      return;
+    }
+    await loadOrders();
+    if (selected && selected.id === orderId) setSelected((s) => ({ ...s, date_relivraison: date }));
+    showToast("Date de livraison mise à jour");
   }
 
   const livreursStats = useMemo(() => {
@@ -662,13 +737,29 @@ export default function App() {
       <div style={{ margin: "14px 20px 0", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "12px 14px" }}>
           <div style={{ fontSize: 11, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em" }}>Chiffre d'affaires</div>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 18, marginTop: 3 }}>{formatFCFA(stats.chiffreAffaires)}</div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 3 }}>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 18 }}>{formatFCFA(stats.chiffreAffaires)}</div>
+            {evolutionCA !== null && (
+              <span style={{ fontSize: 11, fontWeight: 700, color: evolutionCA >= 0 ? "#1F9D6E" : "#D64933" }}>
+                {evolutionCA >= 0 ? "+" : ""}{evolutionCA}%
+              </span>
+            )}
+          </div>
         </div>
         <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "12px 14px" }}>
           <div style={{ fontSize: 11, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em" }}>Taux d'échec</div>
           <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 18, marginTop: 3, color: "#D64933" }}>{stats.tauxEchec}%</div>
         </div>
       </div>
+
+      {clientsSuspects.length > 0 && (
+        <div style={{ margin: "14px 20px 0", background: "#FBEAE6", border: "1px solid #F0B8AC", borderRadius: 12, padding: "12px 14px" }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: "#D64933", marginBottom: 6 }}>⚠️ {clientsSuspects.length} client{clientsSuspects.length > 1 ? "s" : ""} avec 3+ échecs</div>
+          {clientsSuspects.slice(0, 3).map((c, i) => (
+            <div key={i} style={{ fontSize: 12, color: "#B23A22" }}>{c.nom} ({c.tel}) — {c.echouees} échecs sur {c.total}</div>
+          ))}
+        </div>
+      )}
 
       {stats.total > 0 && (
         <div style={{ margin: "16px 20px 0", background: "white", border: "1px solid #ECE8DC", borderRadius: 14, padding: "18px 20px", display: "flex", alignItems: "center", gap: 20 }}>
@@ -741,6 +832,23 @@ export default function App() {
           </div>
         </div>
       )}
+
+      <div style={{ display: "flex", gap: 8, padding: "14px 20px 0" }}>
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Rechercher un client ou numéro..."
+          style={{ flex: 1, padding: "9px 12px", borderRadius: 9, border: "1px solid #DDD8CC", fontSize: 13.5, background: "white" }}
+        />
+        <button
+          onClick={() => exportCSV(filtered)}
+          aria-label="Exporter en CSV"
+          style={{ background: "white", border: "1px solid #DDD8CC", borderRadius: 9, padding: "0 13px", color: "#1a7a3c", fontWeight: 600, fontSize: 12.5, whiteSpace: "nowrap" }}
+        >
+          Exporter
+        </button>
+      </div>
 
       <div style={{ display: "flex", gap: 8, padding: "16px 20px 8px", overflowX: "auto" }}>
         {[
@@ -955,6 +1063,7 @@ export default function App() {
           onStatus={updateStatus}
           livreurs={livreurs}
           onAssignLivreur={assignLivreur}
+          onReschedule={rescheduleOrder}
         />
       )}
       {showAdd && <AddOrder onClose={() => setShowAdd(false)} onAdd={addOrder} />}
@@ -1046,7 +1155,7 @@ function StatusDonut({ livrees, enAttente, echouees }) {
   );
 }
 
-function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur }) {
+function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, onReschedule }) {
   return (
     <div className="rv-modal-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", zIndex: 50 }} onClick={onClose}>
       <div className="rv-modal-sheet" onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", maxHeight: "88vh", overflowY: "auto", borderRadius: "18px 18px 0 0", padding: "18px 20px 28px" }}>
@@ -1106,6 +1215,23 @@ function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur }) {
             ))}
           </div>
         </div>
+
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 6 }}>Reprogrammer la livraison</div>
+          <input
+            type="date"
+            value={order.date_relivraison || ""}
+            onChange={(e) => onReschedule(order.id, e.target.value)}
+            style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 13.5, background: "white" }}
+          />
+          {order.date_relivraison && (
+            <div style={{ fontSize: 12, color: "#1a7a3c", marginTop: 5, fontWeight: 600 }}>
+              📅 Prévue le {new Date(order.date_relivraison + "T00:00:00").toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}
+            </div>
+          )}
+        </div>
+
+        <RelancesHistorique orderId={order.id} />
 
         <div style={{ background: "#EAF7F1", border: "1px solid #CFEBDD", borderRadius: 12, padding: 14, marginBottom: 14 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#1F9D6E", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>
@@ -1639,6 +1765,77 @@ function TeamModal({ onClose, currentUserId }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function RelancesHistorique({ orderId }) {
+  const [relances, setRelances] = useState([]);
+  const [note, setNote] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [adding, setAdding] = useState(false);
+
+  async function load() {
+    const { data, error } = await supabase
+      .from("relances")
+      .select("*")
+      .eq("commande_id", orderId)
+      .order("created_at", { ascending: false });
+    if (!error) setRelances(data || []);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    load();
+  }, [orderId]);
+
+  async function addNote() {
+    if (!note.trim()) return;
+    setAdding(true);
+    const { error } = await supabase.from("relances").insert([{ commande_id: orderId, note: note.trim() }]);
+    if (!error) {
+      setNote("");
+      await load();
+    }
+    setAdding(false);
+  }
+
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 6 }}>
+        Historique des relances {relances.length > 0 && `(${relances.length})`}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+        <input
+          type="text"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && addNote()}
+          placeholder="Ex: Appelé, pas de réponse"
+          style={{ flex: 1, padding: "9px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 13 }}
+        />
+        <button
+          onClick={addNote}
+          disabled={adding || !note.trim()}
+          style={{ background: "#1a7a3c", color: "white", border: "none", borderRadius: 8, padding: "0 14px", fontSize: 13, fontWeight: 600 }}
+        >
+          Ajouter
+        </button>
+      </div>
+
+      {!loading && relances.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {relances.map((r) => (
+            <div key={r.id} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 8, padding: "8px 10px" }}>
+              <div style={{ fontSize: 13 }}>{r.note}</div>
+              <div style={{ fontSize: 10.5, color: "#8A9089", marginTop: 2 }}>
+                {new Date(r.created_at).toLocaleDateString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
