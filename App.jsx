@@ -712,6 +712,13 @@ export default function App() {
           from { transform: translateX(0); }
           to { transform: translateX(-50%); }
         }
+        .rv-3d-card { animation: rv3DFloat 6s ease-in-out infinite; transform-style: preserve-3d; }
+        @keyframes rv3DFloat {
+          0%, 100% { transform: rotateX(0deg) rotateY(0deg) translateZ(0); }
+          25% { transform: rotateX(3deg) rotateY(-4deg) translateZ(6px); }
+          50% { transform: rotateX(0deg) rotateY(0deg) translateZ(0); }
+          75% { transform: rotateX(-3deg) rotateY(4deg) translateZ(6px); }
+        }
         .rv-sidebar { display: none; }
         .rv-content-wrap { }
         @media (min-width: 900px) {
@@ -834,13 +841,13 @@ export default function App() {
 
         <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 90, overflow: "hidden", pointerEvents: "none" }}>
           <svg className="rv-wave rv-wave-1" viewBox="0 0 400 60" preserveAspectRatio="none" style={{ position: "absolute", bottom: -5, width: "200%", height: 70 }}>
-            <path d="M0,30 C40,10 80,50 120,30 C160,10 200,50 240,30 C280,10 320,50 360,30 C380,20 390,25 400,30 L400,60 L0,60 Z" fill="rgba(127,214,163,0.16)" />
+            <path d="M0,30 C40,10 80,50 120,30 C160,10 200,50 240,30 C280,10 320,50 360,30 C380,20 390,25 400,30 L400,60 L0,60 Z" fill="rgba(232,146,10,0.55)" />
           </svg>
           <svg className="rv-wave rv-wave-2" viewBox="0 0 400 60" preserveAspectRatio="none" style={{ position: "absolute", bottom: -8, width: "200%", height: 60 }}>
-            <path d="M0,25 C50,45 90,5 140,25 C190,45 230,5 280,25 C330,45 370,5 400,20 L400,60 L0,60 Z" fill="rgba(232,146,10,0.14)" />
+            <path d="M0,25 C50,45 90,5 140,25 C190,45 230,5 280,25 C330,45 370,5 400,20 L400,60 L0,60 Z" fill="rgba(255,255,255,0.4)" />
           </svg>
           <svg className="rv-wave rv-wave-3" viewBox="0 0 400 60" preserveAspectRatio="none" style={{ position: "absolute", bottom: -3, width: "200%", height: 50 }}>
-            <path d="M0,35 C60,15 100,45 160,25 C220,5 260,45 320,25 C360,10 380,30 400,25 L400,60 L0,60 Z" fill="rgba(255,255,255,0.09)" />
+            <path d="M0,35 C60,15 100,45 160,25 C220,5 260,45 320,25 C360,10 380,30 400,25 L400,60 L0,60 Z" fill="rgba(248,180,60,0.4)" />
           </svg>
         </div>
         <div style={{ position: "relative", zIndex: 1 }}>
@@ -895,11 +902,13 @@ export default function App() {
           </div>
         </div>
 
-        <div style={{ marginTop: 22, position: "relative" }}>
-          <div className="rv-glow" style={{ position: "absolute", top: -20, left: -20, width: 140, height: 140, borderRadius: "50%", background: "radial-gradient(circle, rgba(232,146,10,0.35) 0%, rgba(232,146,10,0) 70%)", pointerEvents: "none" }} />
-          <div style={{ fontSize: 12, opacity: 0.75, letterSpacing: "0.04em", textTransform: "uppercase", position: "relative" }}>Argent récupéré</div>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 38, marginTop: 4, color: "#e8920a", position: "relative" }}>
-            {formatFCFA(stats.recupere)}
+        <div style={{ marginTop: 22, perspective: "800px" }}>
+          <div className="rv-3d-card" style={{ position: "relative", padding: "14px 16px", borderRadius: 16, background: "linear-gradient(155deg, rgba(255,255,255,0.14) 0%, rgba(255,255,255,0.03) 70%)", border: "1px solid rgba(255,255,255,0.18)", boxShadow: "0 12px 30px rgba(0,0,0,0.22)" }}>
+            <div className="rv-glow" style={{ position: "absolute", top: -20, left: -20, width: 140, height: 140, borderRadius: "50%", background: "radial-gradient(circle, rgba(232,146,10,0.35) 0%, rgba(232,146,10,0) 70%)", pointerEvents: "none" }} />
+            <div style={{ fontSize: 12, opacity: 0.75, letterSpacing: "0.04em", textTransform: "uppercase", position: "relative" }}>Argent récupéré</div>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 38, marginTop: 4, color: "#e8920a", position: "relative" }}>
+              {formatFCFA(stats.recupere)}
+            </div>
           </div>
         </div>
 
