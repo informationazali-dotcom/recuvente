@@ -644,6 +644,42 @@ export default function App() {
           0%, 100% { opacity: 0.5; transform: scale(1); }
           50% { opacity: 1; transform: scale(1.15); }
         }
+        .rv-mesh-blob {
+          position: absolute;
+          border-radius: 50%;
+          filter: blur(40px);
+          pointer-events: none;
+        }
+        .rv-mesh-1 {
+          width: 180px; height: 180px;
+          background: radial-gradient(circle, rgba(232,146,10,0.45) 0%, rgba(232,146,10,0) 70%);
+          top: -60px; right: -40px;
+          animation: rvMeshFloat1 9s ease-in-out infinite;
+        }
+        .rv-mesh-2 {
+          width: 140px; height: 140px;
+          background: radial-gradient(circle, rgba(127,214,163,0.4) 0%, rgba(127,214,163,0) 70%);
+          bottom: -50px; left: 10%;
+          animation: rvMeshFloat2 11s ease-in-out infinite;
+        }
+        .rv-mesh-3 {
+          width: 110px; height: 110px;
+          background: radial-gradient(circle, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0) 70%);
+          top: 20%; right: 25%;
+          animation: rvMeshFloat3 7s ease-in-out infinite;
+        }
+        @keyframes rvMeshFloat1 {
+          0%, 100% { transform: translate(0, 0) scale(1); }
+          50% { transform: translate(-20px, 20px) scale(1.15); }
+        }
+        @keyframes rvMeshFloat2 {
+          0%, 100% { transform: translate(0, 0) scale(1); }
+          50% { transform: translate(25px, -15px) scale(1.1); }
+        }
+        @keyframes rvMeshFloat3 {
+          0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.6; }
+          50% { transform: translate(-15px, -10px) scale(1.3); opacity: 1; }
+        }
         .rv-sidebar { display: none; }
         .rv-content-wrap { }
         @media (min-width: 900px) {
@@ -759,7 +795,11 @@ export default function App() {
 
       {view === "dashboard" && (
       <>
-      <div style={{ background: "#1a7a3c", color: "#FAFAF7", padding: "20px 16px 24px" }}>
+      <div style={{ background: "#1a7a3c", color: "#FAFAF7", padding: "20px 16px 24px", position: "relative", overflow: "hidden" }}>
+        <div className="rv-mesh-blob rv-mesh-1" />
+        <div className="rv-mesh-blob rv-mesh-2" />
+        <div className="rv-mesh-blob rv-mesh-3" />
+        <div style={{ position: "relative", zIndex: 1 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
             <div style={{ width: 24, height: 24, borderRadius: 7, background: "rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -832,6 +872,7 @@ export default function App() {
             <div style={{ fontSize: 11, opacity: 0.7 }}>Total</div>
             <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 20 }}>{stats.total}</div>
           </div>
+        </div>
         </div>
       </div>
 
