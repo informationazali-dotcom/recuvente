@@ -72,6 +72,7 @@ export default function App() {
   const [showTeam, setShowTeam] = useState(false);
   const [showBatch, setShowBatch] = useState(false);
   const [showCampagne, setShowCampagne] = useState(false);
+  const [celebration, setCelebration] = useState(null);
   const [selectedClient, setSelectedClient] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [toast, setToast] = useState(null);
@@ -122,6 +123,27 @@ export default function App() {
       g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
       o.start();
       o.stop(ctx.currentTime + 0.35);
+    } catch (e) {}
+  }
+
+  function playCelebrationSound() {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const notes = [523.25, 659.25, 783.99]; // Do-Mi-Sol, accord satisfaisant
+      notes.forEach((freq, i) => {
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.connect(g);
+        g.connect(ctx.destination);
+        o.type = "sine";
+        o.frequency.value = freq;
+        const start = ctx.currentTime + i * 0.09;
+        g.gain.setValueAtTime(0, start);
+        g.gain.linearRampToValueAtTime(0.16, start + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.001, start + 0.5);
+        o.start(start);
+        o.stop(start + 0.5);
+      });
     } catch (e) {}
   }
 
@@ -399,7 +421,8 @@ export default function App() {
 
   async function updateStatus(id, statut) {
     const current = orders.find((o) => o.id === id);
-    const recupere = statut === "confirmee" && current?.statut === "echouee" ? true : current?.recupere;
+    const vraimentRecuperee = statut === "confirmee" && current?.statut === "echouee";
+    const recupere = vraimentRecuperee ? true : current?.recupere;
     const { error } = await supabase.from("commandes").update({ statut, recupere }).eq("id", id);
     if (error) {
       showToast("Erreur: " + error.message);
@@ -407,7 +430,13 @@ export default function App() {
     }
     await loadOrders();
     if (selected && selected.id === id) setSelected((s) => ({ ...s, statut }));
-    showToast(statut === "confirmee" ? "Commande récupérée 💰" : "Statut mis à jour");
+    if (vraimentRecuperee && current) {
+      setCelebration({ montant: current.montant, client: current.client });
+      playCelebrationSound();
+      setTimeout(() => setCelebration(null), 2600);
+    } else {
+      showToast("Statut mis à jour");
+    }
   }
 
   async function addOrder(order) {
@@ -589,6 +618,22 @@ export default function App() {
           to { transform: translateY(0); }
         }
         .rv-modal-backdrop { animation: rvFadeIn 0.18s ease; }
+        .rv-celebrate-in { animation: rvCelebrateIn 0.45s cubic-bezier(0.34, 1.56, 0.64, 1); }
+        @keyframes rvCelebrateIn {
+          0% { opacity: 0; transform: scale(0.5) translateY(20px); }
+          60% { opacity: 1; transform: scale(1.08) translateY(-4px); }
+          100% { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        .rv-celebrate-out { animation: rvCelebrateOut 0.35s ease forwards; }
+        @keyframes rvCelebrateOut {
+          from { opacity: 1; transform: scale(1); }
+          to { opacity: 0; transform: scale(0.92) translateY(-10px); }
+        }
+        .rv-confetti { animation: rvConfetti 1.4s ease-out forwards; }
+        @keyframes rvConfetti {
+          0% { transform: translateY(0) rotate(0deg); opacity: 1; }
+          100% { transform: translateY(90px) rotate(360deg); opacity: 0; }
+        }
         .rv-sidebar { display: none; }
         .rv-content-wrap { }
         @media (min-width: 900px) {
@@ -1174,6 +1219,7 @@ export default function App() {
       {showAddLivreur && <AddLivreur onClose={() => setShowAddLivreur(false)} onAdd={addLivreur} />}
       {showInvite && <InviteModal onClose={() => setShowInvite(false)} />}
       {showTeam && <TeamModal onClose={() => setShowTeam(false)} currentUserId={session.user.id} />}
+      {celebration && <CelebrationOverlay montant={celebration.montant} client={celebration.client} />}
       {showBatch && (
         <BatchRelanceModal
           orders={[...todoAujourdhui.aRelivrer, ...todoAujourdhui.jamaisContactees, ...todoAujourdhui.sansNouvelles]}
@@ -2327,6 +2373,69 @@ function CampagneModal({ clients, onClose }) {
             </button>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function CelebrationOverlay({ montant, client }) {
+  const [leaving, setLeaving] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(() => setLeaving(true), 2000);
+    return () => clearTimeout(t);
+  }, []);
+
+  const confettiColors = ["#e8920a", "#1F9D6E", "#1a7a3c", "#f0b94a"];
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 100,
+        pointerEvents: "none",
+      }}
+    >
+      <div
+        className={leaving ? "rv-celebrate-out" : "rv-celebrate-in"}
+        style={{
+          background: "#16231F",
+          borderRadius: 20,
+          padding: "28px 36px",
+          textAlign: "center",
+          boxShadow: "0 20px 60px rgba(0,0,0,0.35)",
+          position: "relative",
+          overflow: "visible",
+        }}
+      >
+        <div style={{ position: "absolute", top: -6, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 6 }}>
+          {confettiColors.map((c, i) => (
+            <span
+              key={i}
+              className="rv-confetti"
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: i % 2 === 0 ? "50%" : 2,
+                background: c,
+                display: "inline-block",
+                animationDelay: `${i * 0.06}s`,
+              }}
+            />
+          ))}
+        </div>
+
+        <div style={{ fontSize: 32, marginBottom: 6 }}>🎉</div>
+        <div style={{ color: "rgba(255,255,255,0.65)", fontSize: 12.5, marginBottom: 4 }}>
+          Vente récupérée{client ? ` — ${client.split(" ")[0]}` : ""}
+        </div>
+        <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 34, color: "#e8920a" }}>
+          +{formatFCFA(montant)}
+        </div>
       </div>
     </div>
   );
