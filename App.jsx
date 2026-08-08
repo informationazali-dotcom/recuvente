@@ -70,6 +70,7 @@ export default function App() {
   const [showAddLivreur, setShowAddLivreur] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
   const [showTeam, setShowTeam] = useState(false);
+  const [showBatch, setShowBatch] = useState(false);
   const [selectedClient, setSelectedClient] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [toast, setToast] = useState(null);
@@ -439,6 +440,11 @@ export default function App() {
     await loadOrders();
     if (selected && selected.id === orderId) setSelected((s) => ({ ...s, date_relivraison: date }));
     showToast("Date de livraison mise à jour");
+  }
+
+  async function logRelance(orderId, note) {
+    await supabase.from("relances").insert([{ commande_id: orderId, note }]);
+    await loadRelances();
   }
 
   const livreursStats = useMemo(() => {
@@ -1024,7 +1030,7 @@ export default function App() {
 
       {view === "today" && (
         <div className="rv-fadein">
-          <TodayView todo={todoAujourdhui} onSelectOrder={(o) => { setView("dashboard"); setSelected(o); }} />
+          <TodayView todo={todoAujourdhui} onSelectOrder={(o) => { setView("dashboard"); setSelected(o); }} onRelancerTout={() => setShowBatch(true)} />
         </div>
       )}
 
@@ -1132,6 +1138,13 @@ export default function App() {
       {showAddLivreur && <AddLivreur onClose={() => setShowAddLivreur(false)} onAdd={addLivreur} />}
       {showInvite && <InviteModal onClose={() => setShowInvite(false)} />}
       {showTeam && <TeamModal onClose={() => setShowTeam(false)} currentUserId={session.user.id} />}
+      {showBatch && (
+        <BatchRelanceModal
+          orders={[...todoAujourdhui.aRelivrer, ...todoAujourdhui.jamaisContactees, ...todoAujourdhui.sansNouvelles]}
+          onClose={() => setShowBatch(false)}
+          onLog={logRelance}
+        />
+      )}
       {selectedClient && <ClientDetail client={selectedClient} onClose={() => setSelectedClient(null)} onSelectOrder={(o) => { setSelectedClient(null); setView("dashboard"); setSelected(o); }} />}
     </div>
   );
@@ -1903,7 +1916,7 @@ function RelancesHistorique({ orderId, onAdded }) {
   );
 }
 
-function TodayView({ todo, onSelectOrder }) {
+function TodayView({ todo, onSelectOrder, onRelancerTout }) {
   const sections = [
     { key: "aRelivrer", title: "📅 À relivrer aujourd'hui", items: todo.aRelivrer, color: "#1a7a3c", bg: "#EAF3DE" },
     { key: "jamaisContactees", title: "🆕 Jamais contactées", items: todo.jamaisContactees, color: "#8A6412", bg: "#FBF3E3" },
@@ -1912,9 +1925,21 @@ function TodayView({ todo, onSelectOrder }) {
 
   return (
     <div style={{ padding: "20px 20px 8px" }}>
-      <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 22, marginBottom: 4 }}>Aujourd'hui</div>
-      <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 18 }}>
-        {todo.total > 0 ? `${todo.total} commande${todo.total > 1 ? "s" : ""} à traiter` : "Rien à traiter, tout est à jour ✅"}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+        <div>
+          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 22, marginBottom: 4 }}>Aujourd'hui</div>
+          <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 18 }}>
+            {todo.total > 0 ? `${todo.total} commande${todo.total > 1 ? "s" : ""} à traiter` : "Rien à traiter, tout est à jour ✅"}
+          </div>
+        </div>
+        {todo.total > 0 && (
+          <button
+            onClick={onRelancerTout}
+            style={{ background: "#1a7a3c", color: "white", border: "none", borderRadius: 10, padding: "10px 16px", fontSize: 13, fontWeight: 700, whiteSpace: "nowrap", flexShrink: 0 }}
+          >
+            Relancer tout
+          </button>
+        )}
       </div>
 
       {todo.total === 0 && (
@@ -1948,6 +1973,91 @@ function TodayView({ todo, onSelectOrder }) {
           </div>
         ) : null
       )}
+    </div>
+  );
+}
+
+function BatchRelanceModal({ orders, onClose, onLog }) {
+  const [index, setIndex] = useState(0);
+  const [done, setDone] = useState([]);
+  const current = orders[index];
+
+  function next() {
+    if (index < orders.length - 1) setIndex(index + 1);
+    else setIndex(orders.length);
+  }
+
+  async function sendAndLog(type) {
+    if (type === "whatsapp") {
+      window.open(waLink(current), "_blank");
+      await onLog(current.id, "Relance groupée envoyée (WhatsApp)");
+    } else {
+      window.location.href = `sms:${current.tel}?body=${encodeURIComponent(smsMsg(current))}`;
+      await onLog(current.id, "Relance groupée envoyée (SMS)");
+    }
+    setDone((d) => [...d, current.id]);
+  }
+
+  const finished = index >= orders.length;
+
+  return (
+    <div className="rv-modal-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 20 }} onClick={onClose}>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{ background: "#FAFAF7", width: "100%", maxWidth: 380, borderRadius: 18, padding: "20px 20px 24px" }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 18 }}>Relance groupée</div>
+          <button onClick={onClose} style={{ background: "none", border: "none" }}><X size={20} /></button>
+        </div>
+
+        {!finished ? (
+          <>
+            <div style={{ fontSize: 12, color: "#8A9089", marginBottom: 14 }}>
+              {index + 1} / {orders.length} — {done.length} déjà contacté{done.length > 1 ? "s" : ""}
+            </div>
+            <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: 14, marginBottom: 12 }}>
+              <div style={{ fontWeight: 700, fontSize: 16 }}>{current.client}</div>
+              <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{current.tel} · {current.produit}</div>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 15, marginTop: 6, color: "#1a7a3c" }}>{formatFCFA(current.montant)}</div>
+            </div>
+
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              <button
+                onClick={() => sendAndLog("whatsapp")}
+                style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "#1F9D6E", color: "white", border: "none", padding: "11px 0", borderRadius: 10, fontWeight: 600, fontSize: 13.5 }}
+              >
+                <MessageCircle size={16} /> WhatsApp
+              </button>
+              <button
+                onClick={() => sendAndLog("sms")}
+                style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "#1a7a3c", color: "white", border: "none", padding: "11px 0", borderRadius: 10, fontWeight: 600, fontSize: 13.5 }}
+              >
+                <MessageSquare size={16} /> SMS
+              </button>
+            </div>
+
+            <button
+              onClick={next}
+              style={{ width: "100%", padding: "11px 0", borderRadius: 10, border: "1px solid #DDD8CC", background: "white", color: "#16231F", fontWeight: 600, fontSize: 13.5 }}
+            >
+              {index < orders.length - 1 ? "Suivant →" : "Terminer"}
+            </button>
+          </>
+        ) : (
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <div style={{ fontSize: 36, marginBottom: 10 }}>✅</div>
+            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{done.length} relance{done.length > 1 ? "s" : ""} envoyée{done.length > 1 ? "s" : ""}</div>
+            <div style={{ fontSize: 12.5, color: "#6B7168", marginBottom: 18 }}>sur {orders.length} commandes de la liste</div>
+            <button
+              onClick={onClose}
+              style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none", background: "#1a7a3c", color: "white", fontWeight: 600, fontSize: 14 }}
+            >
+              Fermer
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
