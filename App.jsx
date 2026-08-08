@@ -63,7 +63,7 @@ export default function App() {
   const [session, setSession] = useState(undefined);
   const [orders, setOrders] = useState([]);
   const [livreurs, setLivreurs] = useState([]);
-  const [view, setView] = useState("today");
+  const [view, setView] = useState("dashboard");
   const [filter, setFilter] = useState("toutes");
   const [selected, setSelected] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
@@ -599,8 +599,8 @@ export default function App() {
           </div>
         </div>
         {[
-          { key: "today", label: "Aujourd'hui", icon: ListChecks },
           { key: "dashboard", label: "Commandes", icon: Package },
+          { key: "today", label: "Aujourd'hui", icon: ListChecks },
           { key: "clients", label: "Clients", icon: Users },
           { key: "livreurs", label: "Livreurs", icon: Truck },
         ].map((t) => {
@@ -1051,8 +1051,8 @@ export default function App() {
         }}
       >
         {[
-          { key: "today", label: "Aujourd'hui", icon: ListChecks },
           { key: "dashboard", label: "Commandes", icon: Package },
+          { key: "today", label: "Aujourd'hui", icon: ListChecks },
           { key: "clients", label: "Clients", icon: Users },
           { key: "livreurs", label: "Livreurs", icon: Truck },
         ].map((t) => {
