@@ -641,6 +641,22 @@ export default function App() {
     );
   }
 
+  const monProfilCloser = closers.find((c) => c.email && c.email.toLowerCase() === session.user.email.toLowerCase());
+
+  if (monProfilCloser && !error) {
+    return (
+      <CloserPortal
+        closer={monProfilCloser}
+        orders={orders.filter((o) => o.closer === monProfilCloser.nom)}
+        relanceCountByOrder={relanceCountByOrder}
+        onStatus={updateStatus}
+        onReschedule={rescheduleOrder}
+        onRelanceAdded={loadRelances}
+        toast={toast}
+      />
+    );
+  }
+
   if (error) {
     return (
       <div style={{ background: "#FAFAF7", minHeight: "100vh", padding: 24, fontFamily: "'IBM Plex Sans', sans-serif" }}>
@@ -2738,7 +2754,7 @@ function ClosersView({ closers, onDelete, nonAssignees }) {
 }
 
 function AddCloser({ onClose, onAdd }) {
-  const [form, setForm] = useState({ nom: "", telephone: "" });
+  const [form, setForm] = useState({ nom: "", telephone: "", email: "" });
   const canSubmit = form.nom;
 
   return (
@@ -2761,6 +2777,22 @@ function AddCloser({ onClose, onAdd }) {
             />
           </div>
         ))}
+
+        <div style={{ marginBottom: 10 }}>
+          <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4 }}>
+            Email de connexion (optionnel)
+          </label>
+          <input
+            type="email"
+            value={form.email}
+            onChange={(e) => setForm({ ...form, email: e.target.value })}
+            placeholder="pour lui donner accès uniquement à ses commandes"
+            style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, background: "white" }}
+          />
+          <div style={{ fontSize: 11, color: "#8A9089", marginTop: 4 }}>
+            Si renseigné (et un compte créé via "Inviter"), ce closer verra uniquement ses commandes, avec relance/appel/SMS, sans pouvoir s'auto-attribuer d'autres commandes.
+          </div>
+        </div>
 
         <button
           disabled={!canSubmit}
@@ -2858,6 +2890,142 @@ function LivreurPortal({ livreur, orders, onStatus, toast }) {
           </div>
         )}
       </div>
+
+      {toast && (
+        <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: "#16231F", color: "white", padding: "9px 18px", borderRadius: 999, fontSize: 13, fontWeight: 500 }}>
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CloserPortal({ closer, orders, relanceCountByOrder, onStatus, onReschedule, onRelanceAdded, toast }) {
+  const [selected, setSelected] = useState(null);
+
+  const todo = useMemo(() => {
+    const today = new Date();
+    const todayStr = today.toISOString().slice(0, 10);
+    const now24hAgo = new Date(today.getTime() - 24 * 3600 * 1000);
+    const byMontant = (a, b) => Number(b.montant) - Number(a.montant);
+
+    const actives = orders.filter((o) => o.statut === "en_cours" || o.statut === "echouee");
+
+    const aRelivrer = actives.filter((o) => o.date_relivraison === todayStr).sort(byMontant);
+
+    const jamaisContactees = actives
+      .filter((o) => !relanceCountByOrder.count[o.id] && aRelivrer.every((a) => a.id !== o.id))
+      .sort(byMontant);
+
+    const sansNouvelles = actives
+      .filter((o) => {
+        if (aRelivrer.some((a) => a.id === o.id)) return false;
+        if (jamaisContactees.some((j) => j.id === o.id)) return false;
+        const last = relanceCountByOrder.last[o.id];
+        if (!last) return false;
+        return new Date(last) < now24hAgo;
+      })
+      .sort(byMontant);
+
+    const dejaTraitees = actives.filter((o) =>
+      !aRelivrer.some((a) => a.id === o.id) &&
+      !jamaisContactees.some((j) => j.id === o.id) &&
+      !sansNouvelles.some((s) => s.id === o.id)
+    ).sort(byMontant);
+
+    const confirmees = orders.filter((o) => o.statut === "confirmee");
+
+    return { aRelivrer, jamaisContactees, sansNouvelles, dejaTraitees, confirmees, total: actives.length };
+  }, [orders, relanceCountByOrder]);
+
+  const sections = [
+    { key: "aRelivrer", title: "📅 À relivrer aujourd'hui", items: todo.aRelivrer, color: "#1a7a3c" },
+    { key: "jamaisContactees", title: "🆕 Jamais appelées", items: todo.jamaisContactees, color: "#8A6412" },
+    { key: "sansNouvelles", title: "⏰ Sans nouvelles depuis 24h+", items: todo.sansNouvelles, color: "#D64933" },
+    { key: "dejaTraitees", title: "✅ Déjà relancées récemment", items: todo.dejaTraitees, color: "#6B7168" },
+  ];
+
+  return (
+    <div style={{ background: "#FAFAF7", minHeight: "100vh", fontFamily: "'IBM Plex Sans', sans-serif", color: "#16231F", paddingBottom: 20 }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');`}</style>
+
+      <div style={{ background: "#1a7a3c", color: "white", padding: "24px 20px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 18 }}>
+          <div style={{ width: 26, height: 26, borderRadius: 7, background: "rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <svg width="15" height="15" viewBox="0 0 100 100">
+              <polyline points="15,62 40,42 55,56 85,28" stroke="#e8920a" strokeWidth="11" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </div>
+          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 17 }}>
+            RECU<span style={{ color: "#e8920a" }}>VENTE</span>
+          </div>
+          <button
+            onClick={() => supabase.auth.signOut()}
+            style={{ marginLeft: "auto", background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: "6px 12px", borderRadius: 7, fontSize: 12, fontWeight: 500 }}
+          >
+            Déconnexion
+          </button>
+        </div>
+        <div style={{ fontSize: 13, opacity: 0.8 }}>Bonjour</div>
+        <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 22 }}>{closer.nom}</div>
+        <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+          <div style={{ flex: 1, background: "rgba(255,255,255,0.1)", borderRadius: 10, padding: "10px 12px" }}>
+            <div style={{ fontSize: 11, opacity: 0.75 }}>À traiter</div>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 20 }}>{todo.total}</div>
+          </div>
+          <div style={{ flex: 1, background: "rgba(255,255,255,0.1)", borderRadius: 10, padding: "10px 12px" }}>
+            <div style={{ fontSize: 11, opacity: 0.75 }}>Confirmées</div>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 20 }}>{todo.confirmees.length}</div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ padding: "18px 20px" }}>
+        {todo.total === 0 ? (
+          <div style={{ textAlign: "center", padding: "50px 20px", color: "#8A9089" }}>
+            <div style={{ fontSize: 40, marginBottom: 10 }}>🎉</div>
+            <div style={{ fontSize: 14 }}>Aucune commande à traiter pour le moment.</div>
+          </div>
+        ) : (
+          sections.map((sec) =>
+            sec.items.length > 0 ? (
+              <div key={sec.key} style={{ marginBottom: 20 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color: sec.color }}>
+                  {sec.title} ({sec.items.length})
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {sec.items.map((o, oi) => (
+                    <button
+                      key={o.id}
+                      onClick={() => setSelected(o)}
+                      style={{ textAlign: "left", background: "white", border: "1px solid #ECE8DC", borderLeft: `4px solid ${sec.color}`, borderRadius: 10, padding: "12px 14px", display: "flex", alignItems: "center", gap: 10 }}
+                    >
+                      <div style={{ width: 20, height: 20, borderRadius: "50%", background: oi === 0 && sec.key !== "dejaTraitees" ? sec.color : "#ECE8DC", color: oi === 0 && sec.key !== "dejaTraitees" ? "white" : "#8A9089", fontSize: 10.5, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        {oi + 1}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 600, fontSize: 14.5 }}>{o.client}</div>
+                        <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{o.produit} · {o.tel}</div>
+                      </div>
+                      <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 14.5, flexShrink: 0 }}>{formatFCFA(o.montant)}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null
+          )
+        )}
+      </div>
+
+      {selected && (
+        <OrderDetail
+          order={selected}
+          onClose={() => setSelected(null)}
+          onStatus={(id, statut) => { onStatus(id, statut); setSelected(null); }}
+          onReschedule={onReschedule}
+          onRelanceAdded={onRelanceAdded}
+        />
+      )}
 
       {toast && (
         <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: "#16231F", color: "white", padding: "9px 18px", borderRadius: 999, fontSize: 13, fontWeight: 500 }}>
