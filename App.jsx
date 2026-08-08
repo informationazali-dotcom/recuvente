@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { Phone, MessageCircle, MessageSquare, Plus, ChevronLeft, X, Check, Users, Truck, Trash2, Package, UserPlus, LogOut, ListChecks } from "lucide-react";
+import { Phone, MessageCircle, MessageSquare, Plus, ChevronLeft, X, Check, Users, Truck, Trash2, Package, UserPlus, LogOut, ListChecks, Headset } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
 const STATUS = {
@@ -63,11 +63,13 @@ export default function App() {
   const [session, setSession] = useState(undefined);
   const [orders, setOrders] = useState([]);
   const [livreurs, setLivreurs] = useState([]);
+  const [closers, setClosers] = useState([]);
   const [view, setView] = useState("dashboard");
   const [filter, setFilter] = useState("toutes");
   const [selected, setSelected] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
   const [showAddLivreur, setShowAddLivreur] = useState(false);
+  const [showAddCloser, setShowAddCloser] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
   const [showTeam, setShowTeam] = useState(false);
   const [showBatch, setShowBatch] = useState(false);
@@ -192,6 +194,14 @@ export default function App() {
     if (!error) setLivreurs(data || []);
   }
 
+  async function loadClosers() {
+    const { data, error } = await supabase
+      .from("closers")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (!error) setClosers(data || []);
+  }
+
   const [allRelances, setAllRelances] = useState([]);
 
   async function loadRelances() {
@@ -205,10 +215,12 @@ export default function App() {
   useEffect(() => {
     loadOrders();
     loadLivreurs();
+    loadClosers();
     loadRelances();
     const interval = setInterval(() => {
       loadOrders();
       loadLivreurs();
+      loadClosers();
       loadRelances();
     }, 15000);
     return () => clearInterval(interval);
@@ -483,6 +495,37 @@ export default function App() {
     if (selected && selected.id === orderId) setSelected((s) => ({ ...s, livreur: livreurNom }));
   }
 
+  async function addCloser(closer) {
+    const { error } = await supabase.from("closers").insert([closer]);
+    if (error) {
+      showToast("Erreur: " + error.message);
+      return;
+    }
+    await loadClosers();
+    setShowAddCloser(false);
+    showToast("Closer ajouté");
+  }
+
+  async function deleteCloser(id) {
+    const { error } = await supabase.from("closers").delete().eq("id", id);
+    if (error) {
+      showToast("Erreur: " + error.message);
+      return;
+    }
+    await loadClosers();
+    showToast("Closer retiré");
+  }
+
+  async function assignCloser(orderId, closerNom) {
+    const { error } = await supabase.from("commandes").update({ closer: closerNom }).eq("id", orderId);
+    if (error) {
+      showToast("Erreur: " + error.message);
+      return;
+    }
+    await loadOrders();
+    if (selected && selected.id === orderId) setSelected((s) => ({ ...s, closer: closerNom }));
+  }
+
   async function rescheduleOrder(orderId, date) {
     const { error } = await supabase.from("commandes").update({ date_relivraison: date || null }).eq("id", orderId);
     if (error) {
@@ -512,6 +555,22 @@ export default function App() {
     });
     return stats.sort((a, b) => (b.taux ?? -1) - (a.taux ?? -1));
   }, [livreurs, orders]);
+
+  const closersStats = useMemo(() => {
+    const stats = closers.map((c) => {
+      const mesCommandes = orders.filter((o) => o.closer === c.nom);
+      const confirmees = mesCommandes.filter((o) => o.statut === "confirmee");
+      const echouees = mesCommandes.filter((o) => o.statut === "echouee");
+      const enCours = mesCommandes.filter((o) => o.statut === "en_cours");
+      const total = mesCommandes.length;
+      const taux = total ? Math.round((confirmees.length / total) * 100) : null;
+      const montantRecupere = confirmees.reduce((s, o) => s + Number(o.montant), 0);
+      return { ...c, total, confirmees: confirmees.length, echouees: echouees.length, enCours: enCours.length, taux, montantRecupere };
+    });
+    return stats.sort((a, b) => (b.taux ?? -1) - (a.taux ?? -1));
+  }, [closers, orders]);
+
+  const commandesNonAssignees = useMemo(() => orders.filter((o) => !o.closer && (o.statut === "en_cours" || o.statut === "echouee")).length, [orders]);
 
   const clients = useMemo(() => {
     const map = {};
@@ -767,6 +826,7 @@ export default function App() {
           { key: "today", label: "Aujourd'hui", icon: ListChecks },
           { key: "clients", label: "Clients", icon: Users },
           { key: "livreurs", label: "Livreurs", icon: Truck },
+          { key: "closers", label: "Closers", icon: Headset },
         ].map((t) => {
           const Icon = t.icon;
           const active = view === t.key;
@@ -796,7 +856,7 @@ export default function App() {
         })}
         <div style={{ marginTop: "auto", padding: "0 12px" }}>
           <button
-            onClick={() => (view === "livreurs" ? setShowAddLivreur(true) : setShowAdd(true))}
+            onClick={() => (view === "livreurs" ? setShowAddLivreur(true) : view === "closers" ? setShowAddCloser(true) : setShowAdd(true))}
             style={{ width: "100%", padding: "10px 0", borderRadius: 9, border: "none", background: "#e8920a", color: "#16231F", fontWeight: 700, fontSize: 13.5, display: view === "clients" ? "none" : "flex", alignItems: "center", justifyContent: "center", gap: 6, marginBottom: 8 }}
           >
             <Plus size={16} /> Ajouter
@@ -1244,6 +1304,12 @@ export default function App() {
         </div>
       )}
 
+      {view === "closers" && (
+        <div className="rv-fadein">
+          <ClosersView closers={closersStats} onDelete={deleteCloser} nonAssignees={commandesNonAssignees} />
+        </div>
+      )}
+
       </div>
 
       <div
@@ -1266,6 +1332,7 @@ export default function App() {
           { key: "today", label: "Aujourd'hui", icon: ListChecks },
           { key: "clients", label: "Clients", icon: Users },
           { key: "livreurs", label: "Livreurs", icon: Truck },
+          { key: "closers", label: "Closers", icon: Headset },
         ].map((t) => {
           const Icon = t.icon;
           const active = view === t.key;
@@ -1294,7 +1361,7 @@ export default function App() {
 
       <button
         className="rv-fab"
-        onClick={() => (view === "livreurs" ? setShowAddLivreur(true) : setShowAdd(true))}
+        onClick={() => (view === "livreurs" ? setShowAddLivreur(true) : view === "closers" ? setShowAddCloser(true) : setShowAdd(true))}
         style={{
           position: "fixed",
           bottom: 84,
@@ -1328,12 +1395,15 @@ export default function App() {
           onStatus={updateStatus}
           livreurs={livreurs}
           onAssignLivreur={assignLivreur}
+          closers={closers}
+          onAssignCloser={assignCloser}
           onReschedule={rescheduleOrder}
           onRelanceAdded={loadRelances}
         />
       )}
       {showAdd && <AddOrder onClose={() => setShowAdd(false)} onAdd={addOrder} />}
       {showAddLivreur && <AddLivreur onClose={() => setShowAddLivreur(false)} onAdd={addLivreur} />}
+      {showAddCloser && <AddCloser onClose={() => setShowAddCloser(false)} onAdd={addCloser} />}
       {showInvite && <InviteModal onClose={() => setShowInvite(false)} />}
       {showTeam && <TeamModal onClose={() => setShowTeam(false)} currentUserId={session.user.id} />}
       {celebration && <CelebrationOverlay montant={celebration.montant} client={celebration.client} />}
@@ -1430,7 +1500,7 @@ function StatusDonut({ livrees, enAttente, echouees }) {
   );
 }
 
-function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, onReschedule, onRelanceAdded }) {
+function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, closers, onAssignCloser, onReschedule, onRelanceAdded }) {
   return (
     <div className="rv-modal-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", zIndex: 50 }} onClick={onClose}>
       <div className="rv-modal-sheet" onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", maxHeight: "88vh", overflowY: "auto", borderRadius: "18px 18px 0 0", padding: "18px 20px 28px" }}>
@@ -1462,6 +1532,22 @@ function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, onRe
               <option value="">Non assigné</option>
               {livreurs.map((l) => (
                 <option key={l.id} value={l.nom}>{l.nom}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {closers && closers.length > 0 && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 6 }}>Closer assigné</div>
+            <select
+              value={order.closer || ""}
+              onChange={(e) => onAssignCloser(order.id, e.target.value)}
+              style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, background: "white" }}
+            >
+              <option value="">Non assigné</option>
+              {closers.map((c) => (
+                <option key={c.id} value={c.nom}>{c.nom}</option>
               ))}
             </select>
           </div>
@@ -2553,6 +2639,107 @@ function CelebrationOverlay({ montant, client }) {
         <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 34, color: "#e8920a" }}>
           +{formatFCFA(montant)}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function ClosersView({ closers, onDelete, nonAssignees }) {
+  const maxTaux = Math.max(...closers.map((c) => c.taux ?? 0), 1);
+
+  return (
+    <div style={{ padding: "20px 20px 8px" }}>
+      <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 22, marginBottom: 4 }}>Closers</div>
+      <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 14 }}>{closers.length} closer{closers.length > 1 ? "s" : ""} · classés par taux de confirmation</div>
+
+      {nonAssignees > 0 && (
+        <div style={{ background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 12, padding: "10px 14px", marginBottom: 14, fontSize: 12.5, color: "#8A6412", fontWeight: 600 }}>
+          ⚠️ {nonAssignees} commande{nonAssignees > 1 ? "s" : ""} active{nonAssignees > 1 ? "s" : ""} non assignée{nonAssignees > 1 ? "s" : ""} à un closer
+        </div>
+      )}
+
+      {closers.length === 0 && (
+        <div style={{ textAlign: "center", padding: "40px 0", color: "#8A9089", fontSize: 14 }}>Aucun closer ajouté. Appuie sur "+" pour en ajouter un.</div>
+      )}
+
+      {closers.length > 1 && (
+        <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "16px 16px 10px", marginBottom: 14 }}>
+          <div style={{ fontSize: 11, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 12 }}>Comparatif — taux de confirmation</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {closers.map((c) => (
+              <div key={c.id}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 3 }}>
+                  <span>{c.nom}</span>
+                  <span style={{ fontWeight: 600 }}>{c.taux !== null ? c.taux + "%" : "—"}</span>
+                </div>
+                <div style={{ background: "#ECE8DC", borderRadius: 999, height: 7, overflow: "hidden" }}>
+                  <div style={{ width: `${((c.taux ?? 0) / maxTaux) * 100}%`, background: "#1a7a3c", height: "100%", borderRadius: 999 }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {closers.map((c) => (
+          <div key={c.id} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "14px 16px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 15 }}>{c.nom}</div>
+                <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{c.telephone}</div>
+              </div>
+              <button onClick={() => onDelete(c.id)} style={{ background: "none", border: "none", color: "#D64933", padding: 6 }} aria-label="Retirer">
+                <Trash2 size={17} />
+              </button>
+            </div>
+            <div style={{ display: "flex", gap: 14, marginTop: 10, fontSize: 12.5, flexWrap: "wrap" }}>
+              <span style={{ color: "#6B7168" }}>{c.total} commande{c.total > 1 ? "s" : ""}</span>
+              {c.taux !== null && <span style={{ color: "#1a7a3c", fontWeight: 600 }}>{c.taux}% confirmé</span>}
+              {c.enCours > 0 && <span style={{ color: "#8A6412" }}>{c.enCours} en cours</span>}
+            </div>
+            {c.montantRecupere > 0 && (
+              <div style={{ marginTop: 6, fontSize: 12.5, color: "#1F9D6E" }}>+{formatFCFA(c.montantRecupere)} récupéré</div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AddCloser({ onClose, onAdd }) {
+  const [form, setForm] = useState({ nom: "", telephone: "" });
+  const canSubmit = form.nom;
+
+  return (
+    <div className="rv-modal-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", zIndex: 50 }} onClick={onClose}>
+      <div className="rv-modal-sheet" onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", borderRadius: "18px 18px 0 0", padding: "18px 20px 28px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 19 }}>Nouveau closer</div>
+          <button onClick={onClose} style={{ background: "none", border: "none" }}><X size={20} /></button>
+        </div>
+
+        {["nom", "telephone"].map((field) => (
+          <div key={field} style={{ marginBottom: 10 }}>
+            <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4, textTransform: "capitalize" }}>
+              {field === "telephone" ? "Téléphone (optionnel)" : field}
+            </label>
+            <input
+              value={form[field]}
+              onChange={(e) => setForm({ ...form, [field]: e.target.value })}
+              style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, background: "white" }}
+            />
+          </div>
+        ))}
+
+        <button
+          disabled={!canSubmit}
+          onClick={() => canSubmit && onAdd(form)}
+          style={{ width: "100%", marginTop: 6, padding: "13px 0", borderRadius: 10, border: "none", background: canSubmit ? "#1a7a3c" : "#DDD8CC", color: "white", fontWeight: 600, fontSize: 14.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+        >
+          <Check size={17} /> Ajouter le closer
+        </button>
       </div>
     </div>
   );
