@@ -320,7 +320,23 @@ export default function App() {
       return new Date(last) < now24hAgo;
     });
 
-    return { aRelivrer, jamaisContactees, sansNouvelles, total: aRelivrer.length + jamaisContactees.length + sansNouvelles.length };
+    const total = aRelivrer.length + jamaisContactees.length + sansNouvelles.length;
+    const montantTotal = [...aRelivrer, ...jamaisContactees, ...sansNouvelles].reduce((s, o) => s + Number(o.montant), 0);
+
+    const echouees = orders.filter((o) => o.statut === "echouee");
+    const enCoursOrEchouee = orders.filter((o) => o.statut === "en_cours" || o.statut === "echouee");
+    const argentARisque = enCoursOrEchouee.reduce((s, o) => s + Number(o.montant), 0);
+    const argentRecuperable = echouees.reduce((s, o) => s + Number(o.montant), 0);
+
+    return {
+      aRelivrer,
+      jamaisContactees,
+      sansNouvelles,
+      total,
+      montantTotal,
+      argentARisque,
+      argentRecuperable,
+    };
   }, [orders, relanceCountByOrder]);
 
   const [filterLivreur, setFilterLivreur] = useState("tous");
@@ -1943,7 +1959,7 @@ function TodayView({ todo, onSelectOrder, onRelancerTout }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
         <div>
           <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 22, marginBottom: 4 }}>Aujourd'hui</div>
-          <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 18 }}>
+          <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 14 }}>
             {todo.total > 0 ? `${todo.total} commande${todo.total > 1 ? "s" : ""} à traiter` : "Rien à traiter, tout est à jour ✅"}
           </div>
         </div>
@@ -1957,6 +1973,19 @@ function TodayView({ todo, onSelectOrder, onRelancerTout }) {
         )}
       </div>
 
+      {(todo.argentARisque > 0 || todo.argentRecuperable > 0) && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
+          <div style={{ background: "#FBEAE6", border: "1px solid #F0B8AC", borderRadius: 12, padding: "12px 14px" }}>
+            <div style={{ fontSize: 10.5, color: "#B23A22", textTransform: "uppercase", letterSpacing: "0.03em", fontWeight: 600 }}>💸 Argent à risque</div>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 19, marginTop: 3, color: "#D64933" }}>{formatFCFA(todo.argentARisque)}</div>
+          </div>
+          <div style={{ background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 12, padding: "12px 14px" }}>
+            <div style={{ fontSize: 10.5, color: "#8A6412", textTransform: "uppercase", letterSpacing: "0.03em", fontWeight: 600 }}>♻️ Récupérable</div>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 19, marginTop: 3, color: "#8A6412" }}>{formatFCFA(todo.argentRecuperable)}</div>
+          </div>
+        </div>
+      )}
+
       {todo.total === 0 && (
         <div style={{ textAlign: "center", padding: "50px 20px", color: "#8A9089" }}>
           <div style={{ fontSize: 40, marginBottom: 10 }}>🎉</div>
@@ -1964,11 +1993,17 @@ function TodayView({ todo, onSelectOrder, onRelancerTout }) {
         </div>
       )}
 
-      {sections.map((sec) =>
-        sec.items.length > 0 ? (
+      {sections.map((sec) => {
+        const montant = sec.items.reduce((s, o) => s + Number(o.montant), 0);
+        return sec.items.length > 0 ? (
           <div key={sec.key} style={{ marginBottom: 20 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color: sec.color }}>
-              {sec.title} ({sec.items.length})
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: sec.color }}>
+                {sec.title} ({sec.items.length})
+              </div>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, fontWeight: 600, color: sec.color }}>
+                {formatFCFA(montant)}
+              </div>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {sec.items.map((o) => (
@@ -1986,8 +2021,8 @@ function TodayView({ todo, onSelectOrder, onRelancerTout }) {
               ))}
             </div>
           </div>
-        ) : null
-      )}
+        ) : null;
+      })}
     </div>
   );
 }
