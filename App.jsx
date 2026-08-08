@@ -2078,6 +2078,8 @@ function BatchRelanceModal({ orders, onClose, onLog }) {
 }
 
 function CampagneModal({ clients, onClose }) {
+  const [segment, setSegment] = useState("tous");
+  const [segmentProduit, setSegmentProduit] = useState("");
   const [message, setMessage] = useState("");
   const [productLink, setProductLink] = useState("");
   const [started, setStarted] = useState(false);
@@ -2092,7 +2094,30 @@ function CampagneModal({ clients, onClose }) {
     { nom: "AirFlow", url: "https://www.azaliexpress.com/products/azali-airflow-1" },
   ];
 
-  const current = clients[index];
+  const produitsAchetes = useMemo(() => {
+    const set = new Set();
+    clients.forEach((c) => c.commandes.forEach((o) => set.add((o.produit || "").split(" x")[0].trim())));
+    return Array.from(set).filter(Boolean);
+  }, [clients]);
+
+  const clientsSegmentes = useMemo(() => {
+    const now = new Date();
+    if (segment === "inactifs30") {
+      return clients.filter((c) => {
+        const dernier = c.commandes.reduce((max, o) => (new Date(o.created_at) > max ? new Date(o.created_at) : max), new Date(0));
+        return (now - dernier) / (1000 * 3600 * 24) >= 30;
+      });
+    }
+    if (segment === "produit" && segmentProduit) {
+      return clients.filter((c) => c.commandes.some((o) => (o.produit || "").split(" x")[0].trim() === segmentProduit));
+    }
+    if (segment === "vip") {
+      return clients.filter((c) => c.total >= 3);
+    }
+    return clients;
+  }, [clients, segment, segmentProduit]);
+
+  const current = clientsSegmentes[index];
 
   function personalize(tpl, nom) {
     let text = tpl.replace(/\{prenom\}/gi, (nom || "").split(" ")[0] || "");
@@ -2114,7 +2139,7 @@ function CampagneModal({ clients, onClose }) {
     setIndex((i) => i + 1);
   }
 
-  const finished = started && index >= clients.length;
+  const finished = started && index >= clientsSegmentes.length;
 
   return (
     <div className="rv-modal-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 20 }} onClick={onClose}>
@@ -2126,8 +2151,48 @@ function CampagneModal({ clients, onClose }) {
 
         {!started && (
           <>
+            <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 6 }}>À qui envoyer ?</label>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 14 }}>
+              {[
+                { key: "tous", label: `Tous les clients (${clients.length})` },
+                { key: "vip", label: "Meilleurs clients — 3+ achats" },
+                { key: "inactifs30", label: "Inactifs depuis 30+ jours" },
+                { key: "produit", label: "Ayant acheté un produit précis" },
+              ].map((s) => (
+                <button
+                  key={s.key}
+                  onClick={() => setSegment(s.key)}
+                  style={{
+                    textAlign: "left",
+                    padding: "9px 12px",
+                    borderRadius: 9,
+                    border: "1px solid " + (segment === s.key ? "#1a7a3c" : "#DDD8CC"),
+                    background: segment === s.key ? "#EAF3DE" : "white",
+                    color: segment === s.key ? "#1a7a3c" : "#16231F",
+                    fontSize: 13,
+                    fontWeight: segment === s.key ? 600 : 500,
+                  }}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+
+            {segment === "produit" && (
+              <select
+                value={segmentProduit}
+                onChange={(e) => setSegmentProduit(e.target.value)}
+                style={{ width: "100%", padding: "9px 12px", borderRadius: 9, border: "1px solid #DDD8CC", fontSize: 13, marginBottom: 14, background: "white" }}
+              >
+                <option value="">Choisir un produit...</option>
+                {produitsAchetes.map((p) => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+            )}
+
             <div style={{ fontSize: 12.5, color: "#6B7168", marginBottom: 12 }}>
-              Écris ton message une fois. Utilise <strong>{"{prenom}"}</strong> pour insérer automatiquement le prénom de chaque client. Il sera envoyé à <strong>{clients.length} client{clients.length > 1 ? "s" : ""}</strong> un par un.
+              Écris ton message une fois. Utilise <strong>{"{prenom}"}</strong> pour insérer automatiquement le prénom de chaque client. Il sera envoyé à <strong>{clientsSegmentes.length} client{clientsSegmentes.length > 1 ? "s" : ""}</strong> un par un.
             </div>
             <textarea
               value={message}
@@ -2159,7 +2224,7 @@ function CampagneModal({ clients, onClose }) {
 
             <button
               onClick={() => setStarted(true)}
-              disabled={!message.trim() || clients.length === 0}
+              disabled={!message.trim() || clientsSegmentes.length === 0 || (segment === "produit" && !segmentProduit)}
               style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none", background: message.trim() ? "#1a7a3c" : "#DDD8CC", color: "white", fontWeight: 700, fontSize: 14 }}
             >
               Démarrer l'envoi
@@ -2170,7 +2235,7 @@ function CampagneModal({ clients, onClose }) {
         {started && !finished && current && (
           <>
             <div style={{ fontSize: 12, color: "#8A9089", marginBottom: 14 }}>
-              {index + 1} / {clients.length} — {sentCount} envoyé{sentCount > 1 ? "s" : ""}
+              {index + 1} / {clientsSegmentes.length} — {sentCount} envoyé{sentCount > 1 ? "s" : ""}
             </div>
             <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: 14, marginBottom: 12 }}>
               <div style={{ fontWeight: 700, fontSize: 16 }}>{current.nom}</div>
@@ -2197,7 +2262,7 @@ function CampagneModal({ clients, onClose }) {
               onClick={next}
               style={{ width: "100%", padding: "11px 0", borderRadius: 10, border: "1px solid #DDD8CC", background: "white", color: "#16231F", fontWeight: 600, fontSize: 13.5 }}
             >
-              {index < clients.length - 1 ? "Suivant →" : "Terminer"}
+              {index < clientsSegmentes.length - 1 ? "Suivant →" : "Terminer"}
             </button>
           </>
         )}
@@ -2206,7 +2271,7 @@ function CampagneModal({ clients, onClose }) {
           <div style={{ textAlign: "center", padding: "20px 0" }}>
             <div style={{ fontSize: 36, marginBottom: 10 }}>📣</div>
             <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{sentCount} message{sentCount > 1 ? "s" : ""} envoyé{sentCount > 1 ? "s" : ""}</div>
-            <div style={{ fontSize: 12.5, color: "#6B7168", marginBottom: 18 }}>sur {clients.length} clients</div>
+            <div style={{ fontSize: 12.5, color: "#6B7168", marginBottom: 18 }}>sur {clientsSegmentes.length} clients</div>
             <button
               onClick={onClose}
               style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none", background: "#1a7a3c", color: "white", fontWeight: 600, fontSize: 14 }}
