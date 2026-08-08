@@ -628,6 +628,19 @@ export default function App() {
     );
   }
 
+  const monProfilLivreur = livreurs.find((l) => l.email && l.email.toLowerCase() === session.user.email.toLowerCase());
+
+  if (monProfilLivreur && !error) {
+    return (
+      <LivreurPortal
+        livreur={monProfilLivreur}
+        orders={orders.filter((o) => o.livreur === monProfilLivreur.nom)}
+        onStatus={updateStatus}
+        toast={toast}
+      />
+    );
+  }
+
   if (error) {
     return (
       <div style={{ background: "#FAFAF7", minHeight: "100vh", padding: 24, fontFamily: "'IBM Plex Sans', sans-serif" }}>
@@ -1820,7 +1833,7 @@ function total_ok(l) {
 }
 
 function AddLivreur({ onClose, onAdd }) {
-  const [form, setForm] = useState({ nom: "", telephone: "", zone: "" });
+  const [form, setForm] = useState({ nom: "", telephone: "", zone: "", email: "" });
   const canSubmit = form.nom && form.telephone;
 
   return (
@@ -1843,6 +1856,22 @@ function AddLivreur({ onClose, onAdd }) {
             />
           </div>
         ))}
+
+        <div style={{ marginBottom: 10 }}>
+          <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4 }}>
+            Email de connexion (optionnel)
+          </label>
+          <input
+            type="email"
+            value={form.email}
+            onChange={(e) => setForm({ ...form, email: e.target.value })}
+            placeholder="pour lui donner un accès restreint à ses commandes"
+            style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, background: "white" }}
+          />
+          <div style={{ fontSize: 11, color: "#8A9089", marginTop: 4 }}>
+            Si renseigné (et un compte créé via "Inviter"), ce livreur ne verra que ses propres commandes en se connectant.
+          </div>
+        </div>
 
         <button
           disabled={!canSubmit}
@@ -2741,6 +2770,100 @@ function AddCloser({ onClose, onAdd }) {
           <Check size={17} /> Ajouter le closer
         </button>
       </div>
+    </div>
+  );
+}
+
+function LivreurPortal({ livreur, orders, onStatus, toast }) {
+  const actives = orders.filter((o) => o.statut === "en_cours" || o.statut === "echouee");
+  const confirmees = orders.filter((o) => o.statut === "confirmee");
+
+  return (
+    <div style={{ background: "#FAFAF7", minHeight: "100vh", fontFamily: "'IBM Plex Sans', sans-serif", color: "#16231F" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');`}</style>
+
+      <div style={{ background: "#1a7a3c", color: "white", padding: "24px 20px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 18 }}>
+          <div style={{ width: 26, height: 26, borderRadius: 7, background: "rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <svg width="15" height="15" viewBox="0 0 100 100">
+              <polyline points="15,62 40,42 55,56 85,28" stroke="#e8920a" strokeWidth="11" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </div>
+          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 17 }}>
+            RECU<span style={{ color: "#e8920a" }}>VENTE</span>
+          </div>
+          <button
+            onClick={() => supabase.auth.signOut()}
+            style={{ marginLeft: "auto", background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: "6px 12px", borderRadius: 7, fontSize: 12, fontWeight: 500 }}
+          >
+            Déconnexion
+          </button>
+        </div>
+        <div style={{ fontSize: 13, opacity: 0.8 }}>Bonjour</div>
+        <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 22 }}>{livreur.nom}</div>
+        <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+          <div style={{ flex: 1, background: "rgba(255,255,255,0.1)", borderRadius: 10, padding: "10px 12px" }}>
+            <div style={{ fontSize: 11, opacity: 0.75 }}>À traiter</div>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 20 }}>{actives.length}</div>
+          </div>
+          <div style={{ flex: 1, background: "rgba(255,255,255,0.1)", borderRadius: 10, padding: "10px 12px" }}>
+            <div style={{ fontSize: 11, opacity: 0.75 }}>Confirmées</div>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 20 }}>{confirmees.length}</div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ padding: "18px 20px" }}>
+        {actives.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "50px 20px", color: "#8A9089" }}>
+            <div style={{ fontSize: 40, marginBottom: 10 }}>🎉</div>
+            <div style={{ fontSize: 14 }}>Aucune commande à traiter pour le moment.</div>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {actives.map((o) => {
+              const s = STATUS[o.statut];
+              return (
+                <div key={o.id} style={{ background: "white", border: "1px solid #ECE8DC", borderLeft: `4px solid ${s.color}`, borderRadius: 12, padding: "14px 16px" }}>
+                  <div style={{ fontWeight: 700, fontSize: 15.5 }}>{o.client}</div>
+                  <div style={{ fontSize: 13, color: "#6B7168", marginTop: 3 }}>{o.produit}</div>
+                  <div style={{ fontSize: 13, color: "#6B7168", marginTop: 2 }}>📍 {o.zone}</div>
+                  <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 17, marginTop: 8, color: "#1a7a3c" }}>{formatFCFA(o.montant)}</div>
+
+                  <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                    <a
+                      href={`tel:${o.tel}`}
+                      style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "white", border: "1px solid #DDD8CC", color: "#16231F", padding: "10px 0", borderRadius: 9, fontWeight: 600, fontSize: 13, textDecoration: "none" }}
+                    >
+                      <Phone size={15} /> {o.tel}
+                    </a>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                    <button
+                      onClick={() => onStatus(o.id, "confirmee")}
+                      style={{ flex: 1, background: "#1F9D6E", color: "white", border: "none", padding: "11px 0", borderRadius: 9, fontWeight: 700, fontSize: 13.5 }}
+                    >
+                      ✅ Confirmer
+                    </button>
+                    <button
+                      onClick={() => onStatus(o.id, "echouee")}
+                      style={{ flex: 1, background: "#D64933", color: "white", border: "none", padding: "11px 0", borderRadius: 9, fontWeight: 700, fontSize: 13.5 }}
+                    >
+                      ❌ Échoué
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {toast && (
+        <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: "#16231F", color: "white", padding: "9px 18px", borderRadius: 999, fontSize: 13, fontWeight: 500 }}>
+          {toast}
+        </div>
+      )}
     </div>
   );
 }
