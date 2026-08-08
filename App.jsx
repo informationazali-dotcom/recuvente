@@ -71,6 +71,7 @@ export default function App() {
   const [showInvite, setShowInvite] = useState(false);
   const [showTeam, setShowTeam] = useState(false);
   const [showBatch, setShowBatch] = useState(false);
+  const [showCampagne, setShowCampagne] = useState(false);
   const [selectedClient, setSelectedClient] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [toast, setToast] = useState(null);
@@ -660,6 +661,12 @@ export default function App() {
               >
                 <Users size={13} /> Gérer l'équipe
               </button>
+              <button
+                onClick={() => setShowCampagne(true)}
+                style={{ width: "100%", padding: "8px 0", borderRadius: 9, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "rgba(255,255,255,0.75)", fontWeight: 500, fontSize: 12.5, marginBottom: 6, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+              >
+                <MessageCircle size={13} /> Campagne promo
+              </button>
             </>
           )}
           <button
@@ -703,6 +710,13 @@ export default function App() {
                   style={{ background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: 7, borderRadius: 7, display: "flex" }}
                 >
                   <Users size={15} />
+                </button>
+                <button
+                  onClick={() => setShowCampagne(true)}
+                  aria-label="Campagne promo"
+                  style={{ background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: 7, borderRadius: 7, display: "flex" }}
+                >
+                  <MessageCircle size={15} />
                 </button>
               </>
             )}
@@ -1145,6 +1159,7 @@ export default function App() {
           onLog={logRelance}
         />
       )}
+      {showCampagne && <CampagneModal clients={clients} onClose={() => setShowCampagne(false)} />}
       {selectedClient && <ClientDetail client={selectedClient} onClose={() => setSelectedClient(null)} onSelectOrder={(o) => { setSelectedClient(null); setView("dashboard"); setSelected(o); }} />}
     </div>
   );
@@ -2049,6 +2064,117 @@ function BatchRelanceModal({ orders, onClose, onLog }) {
             <div style={{ fontSize: 36, marginBottom: 10 }}>✅</div>
             <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{done.length} relance{done.length > 1 ? "s" : ""} envoyée{done.length > 1 ? "s" : ""}</div>
             <div style={{ fontSize: 12.5, color: "#6B7168", marginBottom: 18 }}>sur {orders.length} commandes de la liste</div>
+            <button
+              onClick={onClose}
+              style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none", background: "#1a7a3c", color: "white", fontWeight: 600, fontSize: 14 }}
+            >
+              Fermer
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CampagneModal({ clients, onClose }) {
+  const [message, setMessage] = useState("");
+  const [started, setStarted] = useState(false);
+  const [index, setIndex] = useState(0);
+  const [sentCount, setSentCount] = useState(0);
+
+  const current = clients[index];
+
+  function personalize(tpl, nom) {
+    return tpl.replace(/\{prenom\}/gi, (nom || "").split(" ")[0] || "");
+  }
+
+  function send(type) {
+    const text = personalize(message, current.nom);
+    if (type === "whatsapp") {
+      window.open(`https://wa.me/${cleanPhoneForWhatsApp(current.tel)}?text=${encodeURIComponent(text)}`, "_blank");
+    } else {
+      window.location.href = `sms:${current.tel}?body=${encodeURIComponent(text)}`;
+    }
+    setSentCount((c) => c + 1);
+  }
+
+  function next() {
+    setIndex((i) => i + 1);
+  }
+
+  const finished = started && index >= clients.length;
+
+  return (
+    <div className="rv-modal-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 20 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", maxWidth: 400, maxHeight: "85vh", overflowY: "auto", borderRadius: 18, padding: "20px 20px 24px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 18 }}>Campagne promo</div>
+          <button onClick={onClose} style={{ background: "none", border: "none" }}><X size={20} /></button>
+        </div>
+
+        {!started && (
+          <>
+            <div style={{ fontSize: 12.5, color: "#6B7168", marginBottom: 12 }}>
+              Écris ton message une fois. Utilise <strong>{"{prenom}"}</strong> pour insérer automatiquement le prénom de chaque client. Il sera envoyé à <strong>{clients.length} client{clients.length > 1 ? "s" : ""}</strong> un par un.
+            </div>
+            <textarea
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              rows={5}
+              placeholder="Ex: Bonjour {prenom} 👋, nouvelle promo chez Azali Express cette semaine : -20% sur tous les produits ! Réponds pour en profiter."
+              style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid #DDD8CC", fontSize: 13.5, marginBottom: 14, resize: "vertical" }}
+            />
+            <button
+              onClick={() => setStarted(true)}
+              disabled={!message.trim() || clients.length === 0}
+              style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none", background: message.trim() ? "#1a7a3c" : "#DDD8CC", color: "white", fontWeight: 700, fontSize: 14 }}
+            >
+              Démarrer l'envoi
+            </button>
+          </>
+        )}
+
+        {started && !finished && current && (
+          <>
+            <div style={{ fontSize: 12, color: "#8A9089", marginBottom: 14 }}>
+              {index + 1} / {clients.length} — {sentCount} envoyé{sentCount > 1 ? "s" : ""}
+            </div>
+            <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: 14, marginBottom: 12 }}>
+              <div style={{ fontWeight: 700, fontSize: 16 }}>{current.nom}</div>
+              <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{current.tel}</div>
+              <div style={{ fontSize: 13, marginTop: 10, background: "#FAFAF7", padding: 10, borderRadius: 8, color: "#16231F" }}>
+                {personalize(message, current.nom)}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              <button
+                onClick={() => send("whatsapp")}
+                style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "#1F9D6E", color: "white", border: "none", padding: "11px 0", borderRadius: 10, fontWeight: 600, fontSize: 13.5 }}
+              >
+                <MessageCircle size={16} /> WhatsApp
+              </button>
+              <button
+                onClick={() => send("sms")}
+                style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "#1a7a3c", color: "white", border: "none", padding: "11px 0", borderRadius: 10, fontWeight: 600, fontSize: 13.5 }}
+              >
+                <MessageSquare size={16} /> SMS
+              </button>
+            </div>
+            <button
+              onClick={next}
+              style={{ width: "100%", padding: "11px 0", borderRadius: 10, border: "1px solid #DDD8CC", background: "white", color: "#16231F", fontWeight: 600, fontSize: 13.5 }}
+            >
+              {index < clients.length - 1 ? "Suivant →" : "Terminer"}
+            </button>
+          </>
+        )}
+
+        {finished && (
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <div style={{ fontSize: 36, marginBottom: 10 }}>📣</div>
+            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{sentCount} message{sentCount > 1 ? "s" : ""} envoyé{sentCount > 1 ? "s" : ""}</div>
+            <div style={{ fontSize: 12.5, color: "#6B7168", marginBottom: 18 }}>sur {clients.length} clients</div>
             <button
               onClick={onClose}
               style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none", background: "#1a7a3c", color: "white", fontWeight: 600, fontSize: 14 }}
