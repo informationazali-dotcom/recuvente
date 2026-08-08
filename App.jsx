@@ -1370,33 +1370,20 @@ function AddLivreur({ onClose, onAdd }) {
 }
 
 function LoginScreen() {
-  const [mode, setMode] = useState("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
   const [loading, setLoading] = useState(false);
-  const [info, setInfo] = useState("");
 
   async function submit() {
     setErrorMsg("");
-    setInfo("");
     if (!email || !password) {
       setErrorMsg("Remplis email et mot de passe.");
       return;
     }
     setLoading(true);
-    if (mode === "signin") {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) setErrorMsg(error.message === "Invalid login credentials" ? "Email ou mot de passe incorrect." : error.message);
-    } else {
-      const { error } = await supabase.auth.signUp({ email, password });
-      if (error) {
-        setErrorMsg(error.message);
-      } else {
-        setInfo("Compte créé. Vérifie ta boîte mail si une confirmation est demandée, sinon tu peux te connecter directement.");
-        setMode("signin");
-      }
-    }
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) setErrorMsg(error.message === "Invalid login credentials" ? "Email ou mot de passe incorrect." : error.message);
     setLoading(false);
   }
 
@@ -1417,10 +1404,10 @@ function LoginScreen() {
 
         <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 16, padding: 26 }}>
           <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 18, marginBottom: 4 }}>
-            {mode === "signin" ? "Connexion" : "Créer un compte"}
+            Connexion
           </div>
           <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 20 }}>
-            {mode === "signin" ? "Accède à ton espace Azali Express" : "Réservé à l'équipe Azali Express"}
+            Accède à ton espace Azali Express. Réservé aux comptes créés par l'administrateur.
           </div>
 
           <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4 }}>Email</label>
@@ -1441,22 +1428,18 @@ function LoginScreen() {
           />
 
           {errorMsg && <div style={{ background: "#FBEAE6", color: "#D64933", fontSize: 12.5, padding: "8px 10px", borderRadius: 8, marginBottom: 12 }}>{errorMsg}</div>}
-          {info && <div style={{ background: "#EAF3DE", color: "#3B6D11", fontSize: 12.5, padding: "8px 10px", borderRadius: 8, marginBottom: 12 }}>{info}</div>}
 
           <button
             onClick={submit}
             disabled={loading}
             style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none", background: "#1a7a3c", color: "white", fontWeight: 700, fontSize: 14.5, opacity: loading ? 0.6 : 1 }}
           >
-            {loading ? "..." : mode === "signin" ? "Se connecter" : "Créer le compte"}
+            {loading ? "..." : "Se connecter"}
           </button>
 
-          <button
-            onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setErrorMsg(""); setInfo(""); }}
-            style={{ width: "100%", padding: "10px 0", background: "none", border: "none", color: "#6B7168", fontSize: 12.5, marginTop: 10 }}
-          >
-            {mode === "signin" ? "Pas encore de compte ? En créer un" : "Déjà un compte ? Se connecter"}
-          </button>
+          <div style={{ fontSize: 11.5, color: "#8A9089", textAlign: "center", marginTop: 14 }}>
+            Pas de compte ? Demande à ton administrateur de t'en créer un.
+          </div>
         </div>
       </div>
     </div>
