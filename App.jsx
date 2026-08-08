@@ -680,6 +680,31 @@ export default function App() {
           0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.6; }
           50% { transform: translate(-15px, -10px) scale(1.3); opacity: 1; }
         }
+        .rv-glass-card {
+          position: relative;
+          overflow: hidden;
+          border-radius: 12px;
+          padding: 11px 13px;
+          background: linear-gradient(155deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.06) 60%, rgba(255,255,255,0.1) 100%);
+          border: 1px solid rgba(255,255,255,0.25);
+          box-shadow: 0 4px 14px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.3), inset 0 -1px 0 rgba(0,0,0,0.08);
+          backdrop-filter: blur(6px);
+        }
+        .rv-glass-shine {
+          position: absolute;
+          top: -50%;
+          left: -60%;
+          width: 60%;
+          height: 200%;
+          background: linear-gradient(120deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.35) 50%, rgba(255,255,255,0) 100%);
+          transform: rotate(20deg);
+          animation: rvShineSweep 3.5s ease-in-out infinite;
+          pointer-events: none;
+        }
+        @keyframes rvShineSweep {
+          0% { left: -60%; }
+          35%, 100% { left: 140%; }
+        }
         .rv-sidebar { display: none; }
         .rv-content-wrap { }
         @media (min-width: 900px) {
@@ -860,17 +885,20 @@ export default function App() {
         </div>
 
         <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
-          <div style={{ flex: 1, background: "rgba(255,255,255,0.08)", borderRadius: 10, padding: "10px 12px" }}>
-            <div style={{ fontSize: 11, opacity: 0.7 }}>À risque</div>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 20 }}>{stats.aRisque}</div>
+          <div className="rv-glass-card" style={{ flex: 1 }}>
+            <div className="rv-glass-shine" />
+            <div style={{ fontSize: 11, opacity: 0.75, position: "relative" }}>À risque</div>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 21, position: "relative" }}>{stats.aRisque}</div>
           </div>
-          <div style={{ flex: 1, background: "rgba(255,255,255,0.08)", borderRadius: 10, padding: "10px 12px" }}>
-            <div style={{ fontSize: 11, opacity: 0.7 }}>Taux livraison</div>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 20 }}>{stats.tauxLivraison}%</div>
+          <div className="rv-glass-card" style={{ flex: 1 }}>
+            <div className="rv-glass-shine" />
+            <div style={{ fontSize: 11, opacity: 0.75, position: "relative" }}>Taux livraison</div>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 21, position: "relative" }}>{stats.tauxLivraison}%</div>
           </div>
-          <div style={{ flex: 1, background: "rgba(255,255,255,0.08)", borderRadius: 10, padding: "10px 12px" }}>
-            <div style={{ fontSize: 11, opacity: 0.7 }}>Total</div>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 20 }}>{stats.total}</div>
+          <div className="rv-glass-card" style={{ flex: 1 }}>
+            <div className="rv-glass-shine" />
+            <div style={{ fontSize: 11, opacity: 0.75, position: "relative" }}>Total</div>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 21, position: "relative" }}>{stats.total}</div>
           </div>
         </div>
         </div>
