@@ -997,7 +997,14 @@ export default function App() {
                     <div>
                       <div style={{ fontWeight: 600, fontSize: 14.5 }}>{o.client}</div>
                       <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{o.produit} · {o.zone}</div>
-                      <div style={{ fontSize: 11.5, color: s.color, marginTop: 4, fontWeight: 500 }}>{o.derniere_tentative}</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+                        <span style={{ fontSize: 11.5, color: s.color, fontWeight: 500 }}>{o.derniere_tentative}</span>
+                        {relanceCountByOrder.count[o.id] > 0 && (
+                          <span style={{ fontSize: 10.5, color: "#1a7a3c", background: "#EAF3DE", padding: "1px 7px", borderRadius: 999, fontWeight: 600 }}>
+                            {relanceCountByOrder.count[o.id]} relance{relanceCountByOrder.count[o.id] > 1 ? "s" : ""}
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <div style={{ textAlign: "right" }}>
                       <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 15 }}>{formatFCFA(o.montant)}</div>
