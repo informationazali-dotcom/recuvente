@@ -719,6 +719,11 @@ export default function App() {
           50% { transform: rotateX(0deg) rotateY(0deg) translateZ(0); }
           75% { transform: rotateX(-3deg) rotateY(4deg) translateZ(6px); }
         }
+        .rv-3d-card-light { animation: rv3DFloatLight 7s ease-in-out infinite; transform-style: preserve-3d; }
+        @keyframes rv3DFloatLight {
+          0%, 100% { transform: rotateX(0deg) rotateY(0deg) translateY(0); box-shadow: 0 6px 16px rgba(22,35,31,0.06); }
+          50% { transform: rotateX(2deg) rotateY(-2.5deg) translateY(-2px); box-shadow: 0 12px 24px rgba(22,35,31,0.1); }
+        }
         .rv-sidebar { display: none; }
         .rv-content-wrap { }
         @media (min-width: 900px) {
@@ -980,8 +985,8 @@ export default function App() {
         </div>
       )}
 
-      <div style={{ margin: "14px 20px 0", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "12px 14px" }}>
+      <div style={{ margin: "14px 20px 0", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, perspective: "700px" }}>
+        <div className="rv-3d-card-light" style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "12px 14px", boxShadow: "0 6px 16px rgba(22,35,31,0.06)" }}>
           <div style={{ fontSize: 11, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em" }}>Chiffre d'affaires</div>
           <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 3 }}>
             <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 18 }}>{formatFCFA(stats.chiffreAffaires)}</div>
@@ -992,7 +997,7 @@ export default function App() {
             )}
           </div>
         </div>
-        <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "12px 14px" }}>
+        <div className="rv-3d-card-light" style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "12px 14px", boxShadow: "0 6px 16px rgba(22,35,31,0.06)", animationDelay: "-3s" }}>
           <div style={{ fontSize: 11, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em" }}>Taux d'échec</div>
           <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 18, marginTop: 3, color: "#D64933" }}>{stats.tauxEchec}%</div>
         </div>
