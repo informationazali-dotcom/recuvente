@@ -705,6 +705,13 @@ export default function App() {
           0% { left: -60%; }
           35%, 100% { left: 140%; }
         }
+        .rv-wave-1 { animation: rvWaveDrift 9s linear infinite; }
+        .rv-wave-2 { animation: rvWaveDrift 14s linear infinite reverse; }
+        .rv-wave-3 { animation: rvWaveDrift 20s linear infinite; }
+        @keyframes rvWaveDrift {
+          from { transform: translateX(0); }
+          to { transform: translateX(-50%); }
+        }
         .rv-sidebar { display: none; }
         .rv-content-wrap { }
         @media (min-width: 900px) {
@@ -824,6 +831,18 @@ export default function App() {
         <div className="rv-mesh-blob rv-mesh-1" />
         <div className="rv-mesh-blob rv-mesh-2" />
         <div className="rv-mesh-blob rv-mesh-3" />
+
+        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 90, overflow: "hidden", pointerEvents: "none" }}>
+          <svg className="rv-wave rv-wave-1" viewBox="0 0 400 60" preserveAspectRatio="none" style={{ position: "absolute", bottom: -5, width: "200%", height: 70 }}>
+            <path d="M0,30 C40,10 80,50 120,30 C160,10 200,50 240,30 C280,10 320,50 360,30 C380,20 390,25 400,30 L400,60 L0,60 Z" fill="rgba(127,214,163,0.16)" />
+          </svg>
+          <svg className="rv-wave rv-wave-2" viewBox="0 0 400 60" preserveAspectRatio="none" style={{ position: "absolute", bottom: -8, width: "200%", height: 60 }}>
+            <path d="M0,25 C50,45 90,5 140,25 C190,45 230,5 280,25 C330,45 370,5 400,20 L400,60 L0,60 Z" fill="rgba(232,146,10,0.14)" />
+          </svg>
+          <svg className="rv-wave rv-wave-3" viewBox="0 0 400 60" preserveAspectRatio="none" style={{ position: "absolute", bottom: -3, width: "200%", height: 50 }}>
+            <path d="M0,35 C60,15 100,45 160,25 C220,5 260,45 320,25 C360,10 380,30 400,25 L400,60 L0,60 Z" fill="rgba(255,255,255,0.09)" />
+          </svg>
+        </div>
         <div style={{ position: "relative", zIndex: 1 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
