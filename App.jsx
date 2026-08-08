@@ -634,6 +634,16 @@ export default function App() {
           0% { transform: translateY(0) rotate(0deg); opacity: 1; }
           100% { transform: translateY(90px) rotate(360deg); opacity: 0; }
         }
+        .rv-livedot { animation: rvPulseDot 2s ease-in-out infinite; }
+        @keyframes rvPulseDot {
+          0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(127,214,163,0.5); }
+          50% { opacity: 0.5; box-shadow: 0 0 0 4px rgba(127,214,163,0); }
+        }
+        .rv-glow { animation: rvGlowBreathe 4s ease-in-out infinite; }
+        @keyframes rvGlowBreathe {
+          0%, 100% { opacity: 0.5; transform: scale(1); }
+          50% { opacity: 1; transform: scale(1.15); }
+        }
         .rv-sidebar { display: none; }
         .rv-content-wrap { }
         @media (min-width: 900px) {
@@ -760,6 +770,10 @@ export default function App() {
             <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 17, letterSpacing: "-0.01em", whiteSpace: "nowrap" }}>
               RECU<span style={{ color: "#e8920a" }}>VENTE</span>
             </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 4, opacity: 0.65 }}>
+              <span className="rv-livedot" style={{ width: 6, height: 6, borderRadius: "50%", background: "#7fd6a3", display: "inline-block" }} />
+              <span style={{ fontSize: 9.5, fontWeight: 500, letterSpacing: "0.03em" }}>EN DIRECT</span>
+            </div>
           </div>
           <div className="rv-mobile-only-logout" style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
             {session.user.email === ADMIN_EMAIL && (
@@ -797,9 +811,10 @@ export default function App() {
           </div>
         </div>
 
-        <div style={{ marginTop: 22 }}>
-          <div style={{ fontSize: 12, opacity: 0.75, letterSpacing: "0.04em", textTransform: "uppercase" }}>Argent récupéré</div>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 38, marginTop: 4, color: "#e8920a" }}>
+        <div style={{ marginTop: 22, position: "relative" }}>
+          <div className="rv-glow" style={{ position: "absolute", top: -20, left: -20, width: 140, height: 140, borderRadius: "50%", background: "radial-gradient(circle, rgba(232,146,10,0.35) 0%, rgba(232,146,10,0) 70%)", pointerEvents: "none" }} />
+          <div style={{ fontSize: 12, opacity: 0.75, letterSpacing: "0.04em", textTransform: "uppercase", position: "relative" }}>Argent récupéré</div>
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 38, marginTop: 4, color: "#e8920a", position: "relative" }}>
             {formatFCFA(stats.recupere)}
           </div>
         </div>
