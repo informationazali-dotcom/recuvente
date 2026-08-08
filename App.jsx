@@ -76,7 +76,7 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
   const [toast, setToast] = useState(null);
   const [error, setError] = useState(null);
-  const [datePreset, setDatePreset] = useState("mois");
+  const [datePreset, setDatePreset] = useState("aujourdhui");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
 
@@ -2012,17 +2012,23 @@ function TodayView({ todo, onSelectOrder, onRelancerTout }) {
               </div>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {sec.items.map((o) => (
+              {sec.items.map((o, oi) => (
                 <button
                   key={o.id}
                   onClick={() => onSelectOrder(o)}
-                  style={{ textAlign: "left", background: "white", border: "1px solid #ECE8DC", borderLeft: `4px solid ${sec.color}`, borderRadius: 10, padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}
+                  style={{ textAlign: "left", background: "white", border: "1px solid #ECE8DC", borderLeft: `4px solid ${sec.color}`, borderRadius: 10, padding: "12px 14px", display: "flex", alignItems: "center", gap: 10 }}
                 >
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: 14.5 }}>{o.client}</div>
+                  <div style={{ width: 22, height: 22, borderRadius: "50%", background: oi === 0 ? sec.color : "#ECE8DC", color: oi === 0 ? "white" : "#8A9089", fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    {oi + 1}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600, fontSize: 14.5, display: "flex", alignItems: "center", gap: 6 }}>
+                      {o.client}
+                      {oi === 0 && <span style={{ fontSize: 10, fontWeight: 700, color: sec.color, background: sec.bg, padding: "1px 7px", borderRadius: 999 }}>🔥 PRIORITÉ</span>}
+                    </div>
                     <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{o.produit} · {o.tel}</div>
                   </div>
-                  <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 14.5 }}>{formatFCFA(o.montant)}</div>
+                  <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 14.5, flexShrink: 0 }}>{formatFCFA(o.montant)}</div>
                 </button>
               ))}
             </div>
