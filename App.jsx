@@ -15,6 +15,15 @@ function formatFCFA(n) {
   return Number(n).toLocaleString("fr-FR").replace(/,/g, " ") + " F";
 }
 
+function parseProduitTexte(texte) {
+  if (!texte) return { nom: "", quantite: 1 };
+  const match = texte.match(/^(.*?)\s*x\s*(\d+)\s*$/i);
+  if (match) {
+    return { nom: match[1].trim(), quantite: Number(match[2]) || 1 };
+  }
+  return { nom: texte.trim(), quantite: 1 };
+}
+
 function exportCSV(orders) {
   const headers = ["Client", "Téléphone", "Produit", "Montant", "Zone", "Statut", "Livreur", "Date"];
   const rows = orders.map((o) => [
@@ -215,6 +224,7 @@ export default function App() {
   const [livreurs, setLivreurs] = useState([]);
   const [closers, setClosers] = useState([]);
   const [comptables, setComptables] = useState([]);
+  const [catalogueProduits, setCatalogueProduits] = useState([]);
   const [view, setView] = useState("dashboard");
   const [filter, setFilter] = useState("toutes");
   const [selected, setSelected] = useState(null);
@@ -224,6 +234,8 @@ export default function App() {
   const [showAddComptable, setShowAddComptable] = useState(false);
   const [showComptables, setShowComptables] = useState(false);
   const [showComptaDetail, setShowComptaDetail] = useState(false);
+  const [showProduits, setShowProduits] = useState(false);
+  const [showAddProduit, setShowAddProduit] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
   const [showTeam, setShowTeam] = useState(false);
   const [showBatch, setShowBatch] = useState(false);
@@ -234,6 +246,7 @@ export default function App() {
   const [livreursLoaded, setLivreursLoaded] = useState(false);
   const [closersLoaded, setClosersLoaded] = useState(false);
   const [comptablesLoaded, setComptablesLoaded] = useState(false);
+  const [produitsLoaded, setProduitsLoaded] = useState(false);
   const [toast, setToast] = useState(null);
   const [error, setError] = useState(null);
   const [datePreset, setDatePreset] = useState("aujourdhui");
@@ -370,6 +383,15 @@ export default function App() {
     setComptablesLoaded(true);
   }
 
+  async function loadProduits() {
+    const { data, error } = await supabase
+      .from("produits")
+      .select("*")
+      .order("nom", { ascending: true });
+    if (!error) setCatalogueProduits(data || []);
+    setProduitsLoaded(true);
+  }
+
   const [allRelances, setAllRelances] = useState([]);
 
   async function loadRelances() {
@@ -385,18 +407,20 @@ export default function App() {
     loadLivreurs();
     loadClosers();
     loadComptables();
+    loadProduits();
     loadRelances();
     const interval = setInterval(() => {
       loadOrders();
       loadLivreurs();
       loadClosers();
       loadComptables();
+      loadProduits();
       loadRelances();
     }, 15000);
     return () => clearInterval(interval);
   }, []);
 
-  const loaded = ordersLoaded && livreursLoaded && closersLoaded && comptablesLoaded;
+  const loaded = ordersLoaded && livreursLoaded && closersLoaded && comptablesLoaded && produitsLoaded;
 
   function showToast(msg) {
     setToast(msg);
@@ -457,6 +481,13 @@ export default function App() {
 
   const COUT_LIVRAISON = 1500;
 
+  function trouverCoutProduit(texteProduit) {
+    const { nom, quantite } = parseProduitTexte(texteProduit);
+    const trouve = catalogueProduits.find((p) => p.nom.toLowerCase() === nom.toLowerCase());
+    if (!trouve) return null;
+    return trouve.cout_achat * quantite;
+  }
+
   const stats = useMemo(() => {
     const confirmees = ordersInRange.filter((o) => o.statut === "confirmee");
     const echouees = ordersInRange.filter((o) => o.statut === "echouee");
@@ -467,7 +498,22 @@ export default function App() {
     const tauxEchec = ordersInRange.length ? Math.round((echouees.length / ordersInRange.length) * 100) : 0;
     const coutLivraisons = confirmees.length * COUT_LIVRAISON;
     const montantConfirme = confirmees.reduce((sum, o) => sum + Number(o.montant), 0);
-    const beneficeReel = montantConfirme - coutLivraisons;
+
+    let coutProduitsTotal = 0;
+    let nbCoutInconnu = 0;
+    let montantCoutInconnu = 0;
+    confirmees.forEach((o) => {
+      const cout = trouverCoutProduit(o.produit);
+      if (cout === null) {
+        nbCoutInconnu += 1;
+        montantCoutInconnu += Number(o.montant);
+      } else {
+        coutProduitsTotal += cout;
+      }
+    });
+
+    const beneficeReel = montantConfirme - coutLivraisons - coutProduitsTotal;
+
     return {
       recupere,
       chiffreAffaires,
@@ -479,9 +525,12 @@ export default function App() {
       enAttente: enCours.length,
       echouees: echouees.length,
       coutLivraisons,
+      coutProduitsTotal,
+      nbCoutInconnu,
+      montantCoutInconnu,
       beneficeReel,
     };
-  }, [ordersInRange]);
+  }, [ordersInRange, catalogueProduits]);
 
   const evolutionCA = useMemo(() => {
     if (chiffreAffairesPrecedent === 0) return null;
@@ -718,6 +767,35 @@ export default function App() {
     }
     await loadComptables();
     showToast("Comptable retiré");
+  }
+
+  async function addProduit(produit) {
+    const { error } = await supabase.from("produits").insert([{ nom: produit.nom, cout_achat: Number(produit.cout_achat) }]);
+    if (error) {
+      showToast("Erreur: " + error.message);
+      return;
+    }
+    await loadProduits();
+    showToast("Produit ajouté");
+  }
+
+  async function updateProduitCout(id, cout_achat) {
+    const { error } = await supabase.from("produits").update({ cout_achat: Number(cout_achat) }).eq("id", id);
+    if (error) {
+      showToast("Erreur: " + error.message);
+      return;
+    }
+    await loadProduits();
+  }
+
+  async function deleteProduit(id) {
+    const { error } = await supabase.from("produits").delete().eq("id", id);
+    if (error) {
+      showToast("Erreur: " + error.message);
+      return;
+    }
+    await loadProduits();
+    showToast("Produit retiré du catalogue");
   }
 
   async function assignCloser(orderId, closerNom) {
@@ -1146,6 +1224,12 @@ export default function App() {
               >
                 🧮 Gérer comptables
               </button>
+              <button
+                onClick={() => setShowProduits(true)}
+                style={{ width: "100%", padding: "8px 0", borderRadius: 9, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "rgba(255,255,255,0.75)", fontWeight: 500, fontSize: 12.5, marginBottom: 6, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+              >
+                📦 Catalogue produits
+              </button>
             </>
           )}
           <button
@@ -1223,6 +1307,13 @@ export default function App() {
                   style={{ background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: 7, borderRadius: 7, display: "flex", fontSize: 14 }}
                 >
                   🧮
+                </button>
+                <button
+                  onClick={() => setShowProduits(true)}
+                  aria-label="Catalogue produits"
+                  style={{ background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: 7, borderRadius: 7, display: "flex", fontSize: 14 }}
+                >
+                  📦
                 </button>
               </>
             )}
@@ -1346,11 +1437,16 @@ export default function App() {
               </div>
             </div>
             <div style={{ textAlign: "right", fontSize: 11, color: "rgba(255,255,255,0.55)" }}>
-              <div>CA confirmé : {formatFCFA(stats.livrees * COUT_LIVRAISON + stats.beneficeReel)}</div>
-              <div style={{ marginTop: 2 }}>− Livraisons : {stats.livrees} × {formatFCFA(COUT_LIVRAISON)}</div>
+              <div>− Livraisons : {stats.livrees} × {formatFCFA(COUT_LIVRAISON)}</div>
+              <div style={{ marginTop: 2 }}>− Produits : {formatFCFA(stats.coutProduitsTotal)}</div>
               <div style={{ marginTop: 6, color: "#e8920a", fontWeight: 600 }}>Voir le détail →</div>
             </div>
           </div>
+          {stats.nbCoutInconnu > 0 && (
+            <div style={{ marginTop: 10, fontSize: 11, color: "#f0c060", background: "rgba(232,146,10,0.15)", padding: "6px 10px", borderRadius: 7 }}>
+              ⚠️ {stats.nbCoutInconnu} commande{stats.nbCoutInconnu > 1 ? "s" : ""} ({formatFCFA(stats.montantCoutInconnu)}) sans coût produit connu — non déduites, bénéfice sous-estimé
+            </div>
+          )}
         </button>
       </div>
 
@@ -1717,6 +1813,16 @@ export default function App() {
           onClose={() => setShowComptaDetail(false)}
         />
       )}
+      {showProduits && (
+        <ProduitsModal
+          produits={catalogueProduits}
+          onDelete={deleteProduit}
+          onUpdateCout={updateProduitCout}
+          onAddClick={() => setShowAddProduit(true)}
+          onClose={() => setShowProduits(false)}
+        />
+      )}
+      {showAddProduit && <AddProduit onClose={() => setShowAddProduit(false)} onAdd={addProduit} />}
       {selectedClient && <ClientDetail client={selectedClient} onClose={() => setSelectedClient(null)} onSelectOrder={(o) => { setSelectedClient(null); setView("dashboard"); setSelected(o); }} />}
     </div>
   );
@@ -3971,6 +4077,121 @@ function ComptaDetailModal({ stats, livreursStats, coutLivraison, periodLabel, o
             </div>
           ))}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function ProduitsModal({ produits, onDelete, onUpdateCout, onAddClick, onClose }) {
+  const [editId, setEditId] = useState(null);
+  const [editValue, setEditValue] = useState("");
+
+  function commencerEdition(p) {
+    setEditId(p.id);
+    setEditValue(String(p.cout_achat));
+  }
+
+  function validerEdition(id) {
+    onUpdateCout(id, editValue);
+    setEditId(null);
+  }
+
+  return (
+    <div className="rv-modal-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", zIndex: 50 }} onClick={onClose}>
+      <div className="rv-modal-sheet" onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", maxHeight: "80vh", overflowY: "auto", borderRadius: "18px 18px 0 0", padding: "18px 20px 28px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 19 }}>Catalogue produits</div>
+          <button onClick={onClose} style={{ background: "none", border: "none" }}><X size={20} /></button>
+        </div>
+
+        <div style={{ fontSize: 12.5, color: "#6B7168", marginBottom: 14 }}>
+          Le nom doit correspondre exactement à celui utilisé dans tes commandes (ex: "Peineili Spray"). Renseigne le coût d'achat unitaire (Alibaba) pour que le Bénéfice réel soit précis.
+        </div>
+
+        <button
+          onClick={onAddClick}
+          style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none", background: "#1a7a3c", color: "white", fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginBottom: 16 }}
+        >
+          <Plus size={17} /> Ajouter un produit
+        </button>
+
+        {produits.length === 0 && (
+          <div style={{ textAlign: "center", padding: "30px 0", color: "#8A9089", fontSize: 14 }}>Aucun produit dans le catalogue.</div>
+        )}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {produits.map((p) => (
+            <div key={p.id} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.nom}</div>
+                {editId === p.id ? (
+                  <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                    <input
+                      type="number"
+                      value={editValue}
+                      onChange={(e) => setEditValue(e.target.value)}
+                      autoFocus
+                      style={{ flex: 1, padding: "6px 8px", borderRadius: 6, border: "1px solid #DDD8CC", fontSize: 13 }}
+                    />
+                    <button onClick={() => validerEdition(p.id)} style={{ background: "#1a7a3c", color: "white", border: "none", borderRadius: 6, padding: "0 10px", fontSize: 12, fontWeight: 600 }}>OK</button>
+                  </div>
+                ) : (
+                  <button onClick={() => commencerEdition(p)} style={{ background: "none", border: "none", padding: 0, marginTop: 3, fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, color: "#6B7168", textDecoration: "underline" }}>
+                    Coût : {formatFCFA(p.cout_achat)}
+                  </button>
+                )}
+              </div>
+              <button onClick={() => onDelete(p.id)} style={{ background: "none", border: "none", color: "#D64933", padding: 6, flexShrink: 0 }} aria-label="Retirer">
+                <Trash2 size={17} />
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AddProduit({ onClose, onAdd }) {
+  const [form, setForm] = useState({ nom: "", cout_achat: "" });
+  const canSubmit = form.nom && form.cout_achat !== "";
+
+  return (
+    <div className="rv-modal-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", zIndex: 55 }} onClick={onClose}>
+      <div className="rv-modal-sheet" onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", borderRadius: "18px 18px 0 0", padding: "18px 20px 28px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 19 }}>Nouveau produit</div>
+          <button onClick={onClose} style={{ background: "none", border: "none" }}><X size={20} /></button>
+        </div>
+
+        <div style={{ marginBottom: 10 }}>
+          <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4 }}>Nom exact (comme dans tes commandes)</label>
+          <input
+            value={form.nom}
+            onChange={(e) => setForm({ ...form, nom: e.target.value })}
+            placeholder="Ex: Peineili Spray"
+            style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, background: "white" }}
+          />
+        </div>
+
+        <div style={{ marginBottom: 10 }}>
+          <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4 }}>Coût d'achat unitaire (FCFA)</label>
+          <input
+            type="number"
+            value={form.cout_achat}
+            onChange={(e) => setForm({ ...form, cout_achat: e.target.value })}
+            placeholder="Ex: 2000"
+            style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, background: "white" }}
+          />
+        </div>
+
+        <button
+          disabled={!canSubmit}
+          onClick={() => canSubmit && onAdd(form)}
+          style={{ width: "100%", marginTop: 6, padding: "13px 0", borderRadius: 10, border: "none", background: canSubmit ? "#1a7a3c" : "#DDD8CC", color: "white", fontWeight: 600, fontSize: 14.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+        >
+          <Check size={17} /> Ajouter au catalogue
+        </button>
       </div>
     </div>
   );
