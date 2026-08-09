@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { Phone, MessageCircle, MessageSquare, Plus, ChevronLeft, X, Check, Users, Truck, Trash2, Package, UserPlus, LogOut, ListChecks, Headset } from "lucide-react";
+import { jsPDF } from "jspdf";
 import { supabase } from "./supabaseClient";
 
 const STATUS = {
@@ -77,6 +78,121 @@ Merci pour votre confiance, à très bientôt ! 💚`;
 
 function merciWaLink(order) {
   return `https://wa.me/${cleanPhoneForWhatsApp(order.tel)}?text=${encodeURIComponent(merciMsg(order))}`;
+}
+
+function numeroFacture(order) {
+  const date = new Date(order.created_at);
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const short = order.id.replace(/-/g, "").slice(0, 6).toUpperCase();
+  return `AZ-${y}${m}-${short}`;
+}
+
+function genererFacturePDF(order) {
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const green = [26, 122, 60];
+  const orange = [232, 146, 10];
+  const gray = [107, 113, 104];
+  const dark = [22, 35, 31];
+
+  // En-tête
+  doc.setFillColor(...green);
+  doc.rect(0, 0, 210, 32, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(20);
+  doc.text("AZALI EXPRESS", 15, 18);
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.text("Abidjan, Côte d'Ivoire", 15, 25);
+
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(14);
+  doc.setFont("helvetica", "bold");
+  doc.text("FACTURE", 195, 18, { align: "right" });
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "normal");
+  doc.text(numeroFacture(order), 195, 25, { align: "right" });
+
+  // Infos commande / client
+  let y = 46;
+  doc.setTextColor(...gray);
+  doc.setFontSize(9);
+  doc.text("FACTURÉ À", 15, y);
+  doc.text("DATE", 140, y);
+
+  y += 6;
+  doc.setTextColor(...dark);
+  doc.setFontSize(12);
+  doc.setFont("helvetica", "bold");
+  doc.text(order.client || "", 15, y);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.text(new Date(order.created_at).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" }), 140, y);
+
+  y += 6;
+  doc.setFontSize(10);
+  doc.setTextColor(...gray);
+  doc.text(order.tel || "", 15, y);
+  if (order.zone) {
+    y += 5;
+    doc.text(order.zone, 15, y, { maxWidth: 90 });
+  }
+
+  // Tableau produit
+  y += 14;
+  doc.setFillColor(...green);
+  doc.rect(15, y, 180, 9, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "bold");
+  doc.text("PRODUIT", 18, y + 6);
+  doc.text("MONTANT", 190, y + 6, { align: "right" });
+
+  y += 9;
+  doc.setDrawColor(230, 230, 225);
+  doc.setTextColor(...dark);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10.5);
+  doc.rect(15, y, 180, 12);
+  doc.text(order.produit || "", 18, y + 8, { maxWidth: 130 });
+  doc.text(formatFCFA(order.montant), 190, y + 8, { align: "right" });
+
+  y += 12;
+
+  // Total
+  y += 8;
+  doc.setDrawColor(...green);
+  doc.setLineWidth(0.5);
+  doc.line(120, y, 195, y);
+  y += 8;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.setTextColor(...dark);
+  doc.text("TOTAL", 120, y);
+  doc.setTextColor(...orange);
+  doc.setFontSize(14);
+  doc.text(formatFCFA(order.montant), 195, y, { align: "right" });
+
+  // Statut paiement
+  y += 12;
+  const statutPaiement = order.statut === "confirmee" ? "PAYÉE (à la livraison)" : "EN ATTENTE DE PAIEMENT";
+  const couleurStatut = order.statut === "confirmee" ? green : orange;
+  doc.setFillColor(...couleurStatut);
+  doc.roundedRect(15, y, 75, 9, 2, 2, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "bold");
+  doc.text(statutPaiement, 52.5, y + 6, { align: "center" });
+
+  // Pied de page
+  doc.setTextColor(...gray);
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "normal");
+  doc.text("Merci pour votre confiance — Azali Express", 105, 280, { align: "center" });
+  doc.text("Paiement à la livraison (COD) — Facture générée automatiquement", 105, 285, { align: "center" });
+
+  doc.save(`Facture-${numeroFacture(order)}.pdf`);
 }
 
 export default function App() {
@@ -1690,6 +1806,13 @@ function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, clos
             🙏 Envoyer message de remerciement + reçu
           </a>
         )}
+
+        <button
+          onClick={() => genererFacturePDF(order)}
+          style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: "white", border: "1px solid #DDD8CC", color: "#16231F", padding: "12px 0", borderRadius: 10, fontWeight: 600, fontSize: 13.5, marginBottom: 14 }}
+        >
+          🧾 Télécharger la facture PDF
+        </button>
 
         <div style={{ display: "flex", gap: 10 }}>
           <a href={waLink(order)} target="_blank" rel="noopener noreferrer" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, background: "#1F9D6E", color: "white", padding: "12px 0", borderRadius: 10, fontWeight: 600, fontSize: 14, textDecoration: "none" }}>
