@@ -728,7 +728,8 @@ export default function App() {
       const montantRecupere = livrees.reduce((s, o) => s + Number(o.montant), 0);
       const montantPerdu = echouees.reduce((s, o) => s + Number(o.montant), 0);
       const montantDu = livrees.length * 1500;
-      return { ...l, total, livrees: livrees.length, echouees: echouees.length, taux, montantRecupere, montantPerdu, montantDu };
+      const montantADeposer = montantRecupere - montantDu;
+      return { ...l, total, livrees: livrees.length, echouees: echouees.length, taux, montantRecupere, montantPerdu, montantDu, montantADeposer };
     });
     return stats.sort((a, b) => (b.taux ?? -1) - (a.taux ?? -1));
   }, [livreurs, ordersInRange]);
@@ -2027,6 +2028,7 @@ function LivreursView({ livreurs, onDelete, readOnly, periodLabel }) {
   const maxTaux = Math.max(...livreurs.map((l) => l.taux ?? 0), 1);
   const medailles = ["🥇", "🥈", "🥉"];
   const totalDu = livreurs.reduce((s, l) => s + (l.montantDu || 0), 0);
+  const totalADeposer = livreurs.reduce((s, l) => s + (l.montantADeposer || 0), 0);
 
   return (
     <div style={{ padding: "20px 20px 8px" }}>
@@ -2038,10 +2040,16 @@ function LivreursView({ livreurs, onDelete, readOnly, periodLabel }) {
         </div>
       )}
 
-      {totalDu > 0 && (
-        <div style={{ background: "linear-gradient(135deg, #16231F, #1e2f28)", borderRadius: 14, padding: "16px 18px", marginBottom: 14 }}>
-          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.65)", textTransform: "uppercase", letterSpacing: "0.03em" }}>💵 Total à payer aux livreurs</div>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 24, color: "#e8920a", marginTop: 3 }}>{formatFCFA(totalDu)}</div>
+      {(totalDu > 0 || totalADeposer > 0) && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
+          <div style={{ background: "linear-gradient(135deg, #16231F, #1e2f28)", borderRadius: 14, padding: "14px 16px" }}>
+            <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.65)", textTransform: "uppercase", letterSpacing: "0.03em" }}>💵 À payer aux livreurs</div>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 19, color: "#e8920a", marginTop: 3 }}>{formatFCFA(totalDu)}</div>
+          </div>
+          <div style={{ background: "linear-gradient(135deg, #1a7a3c, #1F9D6E)", borderRadius: 14, padding: "14px 16px" }}>
+            <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.75)", textTransform: "uppercase", letterSpacing: "0.03em" }}>🏦 Dépôt attendu</div>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 19, color: "white", marginTop: 3 }}>{formatFCFA(totalADeposer)}</div>
+          </div>
         </div>
       )}
 
@@ -2098,8 +2106,14 @@ function LivreursView({ livreurs, onDelete, readOnly, periodLabel }) {
             )}
             {l.montantDu > 0 && (
               <div style={{ marginTop: 10, background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 8, padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ fontSize: 12, color: "#8A6412", fontWeight: 600 }}>💵 À lui payer</span>
+                <span style={{ fontSize: 12, color: "#8A6412", fontWeight: 600 }}>💵 Sa commission</span>
                 <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 15, color: "#8A6412" }}>{formatFCFA(l.montantDu)}</span>
+              </div>
+            )}
+            {l.montantADeposer > 0 && (
+              <div style={{ marginTop: 6, background: "#EAF3DE", border: "1px solid #C7DDA3", borderRadius: 8, padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 12, color: "#3B6D11", fontWeight: 600 }}>🏦 Doit déposer</span>
+                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 15, color: "#3B6D11" }}>{formatFCFA(l.montantADeposer)}</span>
               </div>
             )}
           </div>
