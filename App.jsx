@@ -468,6 +468,9 @@ export default function App() {
     }
     await loadOrders();
     if (selected && selected.id === id) setSelected((s) => ({ ...s, statut }));
+    if (current && current.statut !== statut) {
+      logEvent(id, `📋 Statut : ${STATUS[current.statut]?.label || current.statut} → ${STATUS[statut]?.label || statut}`);
+    }
     if (vraimentRecuperee && current) {
       setCelebration({ montant: current.montant, client: current.client });
       playCelebrationSound();
@@ -519,6 +522,7 @@ export default function App() {
     }
     await loadOrders();
     if (selected && selected.id === orderId) setSelected((s) => ({ ...s, livreur: livreurNom }));
+    logEvent(orderId, livreurNom ? `🚚 Livreur assigné : ${livreurNom}` : "🚚 Livreur retiré");
   }
 
   async function addCloser(closer) {
@@ -550,6 +554,7 @@ export default function App() {
     }
     await loadOrders();
     if (selected && selected.id === orderId) setSelected((s) => ({ ...s, closer: closerNom }));
+    logEvent(orderId, closerNom ? `🎧 Closer assigné : ${closerNom}` : "🎧 Closer retiré");
   }
 
   async function rescheduleOrder(orderId, date) {
@@ -560,7 +565,15 @@ export default function App() {
     }
     await loadOrders();
     if (selected && selected.id === orderId) setSelected((s) => ({ ...s, date_relivraison: date }));
+    if (date) {
+      logEvent(orderId, `📅 Livraison reprogrammée au ${new Date(date + "T00:00:00").toLocaleDateString("fr-FR")}`);
+    }
     showToast("Date de livraison mise à jour");
+  }
+
+  async function logEvent(orderId, note) {
+    await supabase.from("relances").insert([{ commande_id: orderId, note }]);
+    loadRelances();
   }
 
   async function logRelance(orderId, note) {
@@ -1647,7 +1660,7 @@ function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, clos
           )}
         </div>
 
-        <RelancesHistorique orderId={order.id} onAdded={onRelanceAdded} />
+        <RelancesHistorique key={`${order.id}-${order.statut}-${order.livreur}-${order.closer}-${order.date_relivraison}`} orderId={order.id} onAdded={onRelanceAdded} />
 
         <div style={{ background: "#EAF7F1", border: "1px solid #CFEBDD", borderRadius: 12, padding: 14, marginBottom: 14 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#1F9D6E", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>
