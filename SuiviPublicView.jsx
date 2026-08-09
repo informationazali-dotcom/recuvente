@@ -1,4 +1,4 @@
- import React, { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -134,9 +134,27 @@ export default function SuiviPublicView({ commandeId }) {
               </div>
             )}
 
-            <div style={{ fontSize: 11.5, color: "#8A9089", marginTop: 18, textAlign: "center" }}>
-              Une question ? Contactez-nous directement sur WhatsApp.
-            </div>
+            <a
+              href="https://wa.me/2250711355743"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                background: "#1F9D6E",
+                color: "white",
+                padding: "12px 0",
+                borderRadius: 10,
+                fontWeight: 600,
+                fontSize: 13.5,
+                textDecoration: "none",
+                marginTop: 18,
+              }}
+            >
+              💬 Une question ? Écrivez-nous sur WhatsApp
+            </a>
           </div>
         )}
       </div>
