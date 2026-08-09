@@ -613,14 +613,23 @@ export default function App() {
       map[key].commandes.push(o);
     });
     return Object.values(map)
-      .map((c) => ({
-        ...c,
-        total: c.commandes.length,
-        confirmees: c.commandes.filter((o) => o.statut === "confirmee").length,
-        echouees: c.commandes.filter((o) => o.statut === "echouee").length,
-        montantTotal: c.commandes.reduce((s, o) => s + (o.recupere ? Number(o.montant) : 0), 0),
-      }))
-      .sort((a, b) => b.total - a.total);
+      .map((c) => {
+        const produitCount = {};
+        c.commandes.forEach((o) => {
+          const p = (o.produit || "").split(" x")[0].trim();
+          if (p) produitCount[p] = (produitCount[p] || 0) + 1;
+        });
+        const produitPrefere = Object.entries(produitCount).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+        return {
+          ...c,
+          total: c.commandes.length,
+          confirmees: c.commandes.filter((o) => o.statut === "confirmee").length,
+          echouees: c.commandes.filter((o) => o.statut === "echouee").length,
+          montantTotal: c.commandes.reduce((s, o) => s + (o.recupere ? Number(o.montant) : 0), 0),
+          produitPrefere,
+        };
+      })
+      .sort((a, b) => b.montantTotal - a.montantTotal);
   }, [orders]);
 
   const produits = useMemo(() => {
@@ -1716,7 +1725,7 @@ function ClientsView({ clients, onSelect }) {
   return (
     <div style={{ padding: "20px 20px 8px" }}>
       <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 22, marginBottom: 4 }}>Clients</div>
-      <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 18 }}>{clients.length} client{clients.length > 1 ? "s" : ""} au total</div>
+      <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 18 }}>{clients.length} client{clients.length > 1 ? "s" : ""} · classés par argent dépensé</div>
 
       {clients.length === 0 && (
         <div style={{ textAlign: "center", padding: "40px 0", color: "#8A9089", fontSize: 14 }}>Aucun client pour l'instant.</div>
@@ -1730,16 +1739,22 @@ function ClientsView({ clients, onSelect }) {
             style={{ textAlign: "left", background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}
           >
             <div>
-              <div style={{ fontWeight: 600, fontSize: 15 }}>{c.nom}</div>
+              <div style={{ fontWeight: 600, fontSize: 15, display: "flex", alignItems: "center", gap: 6 }}>
+                {i < 3 && c.montantTotal > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: "#e8920a", background: "#FBF3E3", padding: "1px 7px", borderRadius: 999 }}>🏆 TOP CLIENT</span>}
+                {c.nom}
+              </div>
               <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{c.tel} · {c.zone}</div>
+              {c.produitPrefere && (
+                <div style={{ fontSize: 11.5, color: "#8A9089", marginTop: 3 }}>Préfère : {c.produitPrefere}</div>
+              )}
               <div style={{ fontSize: 12, marginTop: 5, display: "flex", gap: 10 }}>
                 <span style={{ color: "#1a7a3c" }}>{c.confirmees} livrée{c.confirmees > 1 ? "s" : ""}</span>
                 {c.echouees > 0 && <span style={{ color: "#D64933" }}>{c.echouees} échouée{c.echouees > 1 ? "s" : ""}</span>}
               </div>
             </div>
             <div style={{ textAlign: "right" }}>
-              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 15 }}>{c.total}</div>
-              <div style={{ fontSize: 10.5, color: "#8A9089" }}>commande{c.total > 1 ? "s" : ""}</div>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 15, color: "#1a7a3c" }}>{formatFCFA(c.montantTotal)}</div>
+              <div style={{ fontSize: 10.5, color: "#8A9089" }}>{c.total} commande{c.total > 1 ? "s" : ""}</div>
             </div>
           </button>
         ))}
@@ -1759,6 +1774,19 @@ function ClientDetail({ client, onClose, onSelectOrder }) {
           <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 19 }}>{client.nom}</div>
         </div>
         <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 16 }}>{client.tel} · {client.zone}</div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
+          <div style={{ background: "#EAF3DE", border: "1px solid #C7DDA3", borderRadius: 12, padding: "12px 14px" }}>
+            <div style={{ fontSize: 10.5, color: "#3B6D11", textTransform: "uppercase", letterSpacing: "0.03em" }}>Total dépensé</div>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 17, color: "#3B6D11", marginTop: 2 }}>{formatFCFA(client.montantTotal)}</div>
+          </div>
+          {client.produitPrefere && (
+            <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "12px 14px" }}>
+              <div style={{ fontSize: 10.5, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em" }}>Produit préféré</div>
+              <div style={{ fontWeight: 600, fontSize: 13.5, marginTop: 2 }}>{client.produitPrefere}</div>
+            </div>
+          )}
+        </div>
 
         <div style={{ display: "flex", gap: 10, marginBottom: 18 }}>
           <a
