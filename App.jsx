@@ -727,7 +727,8 @@ export default function App() {
       const taux = total ? Math.round((livrees.length / total) * 100) : null;
       const montantRecupere = livrees.reduce((s, o) => s + Number(o.montant), 0);
       const montantPerdu = echouees.reduce((s, o) => s + Number(o.montant), 0);
-      return { ...l, total, livrees: livrees.length, echouees: echouees.length, taux, montantRecupere, montantPerdu };
+      const montantDu = livrees.length * 1500;
+      return { ...l, total, livrees: livrees.length, echouees: echouees.length, taux, montantRecupere, montantPerdu, montantDu };
     });
     return stats.sort((a, b) => (b.taux ?? -1) - (a.taux ?? -1));
   }, [livreurs, ordersInRange]);
@@ -2025,6 +2026,7 @@ function ClientDetail({ client, onClose, onSelectOrder }) {
 function LivreursView({ livreurs, onDelete, readOnly, periodLabel }) {
   const maxTaux = Math.max(...livreurs.map((l) => l.taux ?? 0), 1);
   const medailles = ["🥇", "🥈", "🥉"];
+  const totalDu = livreurs.reduce((s, l) => s + (l.montantDu || 0), 0);
 
   return (
     <div style={{ padding: "20px 20px 8px" }}>
@@ -2033,6 +2035,13 @@ function LivreursView({ livreurs, onDelete, readOnly, periodLabel }) {
       {periodLabel && (
         <div style={{ display: "inline-block", fontSize: 11, fontWeight: 600, color: "#1a7a3c", background: "#EAF3DE", padding: "3px 10px", borderRadius: 999, marginBottom: 14 }}>
           📊 {periodLabel}
+        </div>
+      )}
+
+      {totalDu > 0 && (
+        <div style={{ background: "linear-gradient(135deg, #16231F, #1e2f28)", borderRadius: 14, padding: "16px 18px", marginBottom: 14 }}>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.65)", textTransform: "uppercase", letterSpacing: "0.03em" }}>💵 Total à payer aux livreurs</div>
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 24, color: "#e8920a", marginTop: 3 }}>{formatFCFA(totalDu)}</div>
         </div>
       )}
 
@@ -2085,6 +2094,12 @@ function LivreursView({ livreurs, onDelete, readOnly, periodLabel }) {
               <div style={{ display: "flex", gap: 16, marginTop: 6, fontSize: 12.5 }}>
                 <span style={{ color: "#1F9D6E" }}>+{formatFCFA(l.montantRecupere)} récupéré</span>
                 {l.montantPerdu > 0 && <span style={{ color: "#D64933" }}>-{formatFCFA(l.montantPerdu)} perdu</span>}
+              </div>
+            )}
+            {l.montantDu > 0 && (
+              <div style={{ marginTop: 10, background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 8, padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 12, color: "#8A6412", fontWeight: 600 }}>💵 À lui payer</span>
+                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 15, color: "#8A6412" }}>{formatFCFA(l.montantDu)}</span>
               </div>
             )}
           </div>
@@ -3176,6 +3191,13 @@ function LivreurPortal({ livreur, orders, onStatus, toast }) {
           <div style={{ flex: 1, background: "rgba(255,255,255,0.1)", borderRadius: 10, padding: "10px 12px" }}>
             <div style={{ fontSize: 11, opacity: 0.75 }}>Confirmées</div>
             <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 20 }}>{confirmees.length}</div>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 10, background: "rgba(232,146,10,0.18)", border: "1px solid rgba(232,146,10,0.35)", borderRadius: 10, padding: "12px 14px" }}>
+          <div style={{ fontSize: 11, opacity: 0.85 }}>💰 Mes gains ({confirmees.length} × 1 500 F)</div>
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 22, color: "#e8920a", marginTop: 2 }}>
+            {formatFCFA(confirmees.length * 1500)}
           </div>
         </div>
       </div>
