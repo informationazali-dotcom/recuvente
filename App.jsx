@@ -649,20 +649,6 @@ export default function App() {
 
   const monProfilCloser = closers.find((c) => c.email && c.email.toLowerCase() === session.user.email.toLowerCase());
 
-  if (monProfilCloser && !error) {
-    return (
-      <CloserPortal
-        closer={monProfilCloser}
-        orders={orders.filter((o) => o.closer === monProfilCloser.nom)}
-        relanceCountByOrder={relanceCountByOrder}
-        onStatus={updateStatus}
-        onReschedule={rescheduleOrder}
-        onRelanceAdded={loadRelances}
-        toast={toast}
-      />
-    );
-  }
-
   if (error) {
     return (
       <div style={{ background: "#FAFAF7", minHeight: "100vh", padding: 24, fontFamily: "'IBM Plex Sans', sans-serif" }}>
@@ -862,7 +848,7 @@ export default function App() {
           { key: "clients", label: "Clients", icon: Users },
           { key: "livreurs", label: "Livreurs", icon: Truck },
           { key: "closers", label: "Closers", icon: Headset },
-        ].map((t) => {
+        ].filter((t) => !monProfilCloser || (t.key !== "livreurs" && t.key !== "closers")).map((t) => {
           const Icon = t.icon;
           const active = view === t.key;
           return (
@@ -1368,7 +1354,7 @@ export default function App() {
           { key: "clients", label: "Clients", icon: Users },
           { key: "livreurs", label: "Livreurs", icon: Truck },
           { key: "closers", label: "Closers", icon: Headset },
-        ].map((t) => {
+        ].filter((t) => !monProfilCloser || (t.key !== "livreurs" && t.key !== "closers")).map((t) => {
           const Icon = t.icon;
           const active = view === t.key;
           return (
@@ -1430,7 +1416,7 @@ export default function App() {
           onStatus={updateStatus}
           livreurs={livreurs}
           onAssignLivreur={assignLivreur}
-          closers={closers}
+          closers={monProfilCloser ? null : closers}
           onAssignCloser={assignCloser}
           onReschedule={rescheduleOrder}
           onRelanceAdded={loadRelances}
