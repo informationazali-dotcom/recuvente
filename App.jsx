@@ -848,7 +848,7 @@ export default function App() {
           { key: "clients", label: "Clients", icon: Users },
           { key: "livreurs", label: "Livreurs", icon: Truck },
           { key: "closers", label: "Closers", icon: Headset },
-        ].filter((t) => !monProfilCloser || (t.key !== "livreurs" && t.key !== "closers")).map((t) => {
+        ].filter((t) => !monProfilCloser || t.key !== "closers").map((t) => {
           const Icon = t.icon;
           const active = view === t.key;
           return (
@@ -878,7 +878,7 @@ export default function App() {
         <div style={{ marginTop: "auto", padding: "0 12px" }}>
           <button
             onClick={() => (view === "livreurs" ? setShowAddLivreur(true) : view === "closers" ? setShowAddCloser(true) : setShowAdd(true))}
-            style={{ width: "100%", padding: "10px 0", borderRadius: 9, border: "none", background: "#e8920a", color: "#16231F", fontWeight: 700, fontSize: 13.5, display: view === "clients" ? "none" : "flex", alignItems: "center", justifyContent: "center", gap: 6, marginBottom: 8 }}
+            style={{ width: "100%", padding: "10px 0", borderRadius: 9, border: "none", background: "#e8920a", color: "#16231F", fontWeight: 700, fontSize: 13.5, display: (view === "clients" || (view === "livreurs" && monProfilCloser)) ? "none" : "flex", alignItems: "center", justifyContent: "center", gap: 6, marginBottom: 8 }}
           >
             <Plus size={16} /> Ajouter
           </button>
@@ -1321,7 +1321,7 @@ export default function App() {
 
       {view === "livreurs" && (
         <div className="rv-fadein">
-          <LivreursView livreurs={livreursStats} onDelete={deleteLivreur} />
+          <LivreursView livreurs={livreursStats} onDelete={deleteLivreur} readOnly={!!monProfilCloser} />
         </div>
       )}
 
@@ -1354,7 +1354,7 @@ export default function App() {
           { key: "clients", label: "Clients", icon: Users },
           { key: "livreurs", label: "Livreurs", icon: Truck },
           { key: "closers", label: "Closers", icon: Headset },
-        ].filter((t) => !monProfilCloser || (t.key !== "livreurs" && t.key !== "closers")).map((t) => {
+        ].filter((t) => !monProfilCloser || t.key !== "closers").map((t) => {
           const Icon = t.icon;
           const active = view === t.key;
           return (
@@ -1393,7 +1393,7 @@ export default function App() {
           background: "#1a7a3c",
           color: "white",
           border: "none",
-          display: view === "clients" ? "none" : "flex",
+          display: (view === "clients" || (view === "livreurs" && monProfilCloser)) ? "none" : "flex",
           alignItems: "center",
           justifyContent: "center",
           boxShadow: "0 6px 18px rgba(15,61,62,0.35)",
@@ -1773,7 +1773,7 @@ function ClientDetail({ client, onClose, onSelectOrder }) {
   );
 }
 
-function LivreursView({ livreurs, onDelete }) {
+function LivreursView({ livreurs, onDelete, readOnly }) {
   const maxTaux = Math.max(...livreurs.map((l) => l.taux ?? 0), 1);
   const medailles = ["🥇", "🥈", "🥉"];
 
@@ -1783,7 +1783,7 @@ function LivreursView({ livreurs, onDelete }) {
       <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 18 }}>{livreurs.length} livreur{livreurs.length > 1 ? "s" : ""} · classés par taux de réussite</div>
 
       {livreurs.length === 0 && (
-        <div style={{ textAlign: "center", padding: "40px 0", color: "#8A9089", fontSize: 14 }}>Aucun livreur ajouté. Appuie sur "+" pour en ajouter un.</div>
+        <div style={{ textAlign: "center", padding: "40px 0", color: "#8A9089", fontSize: 14 }}>Aucun livreur ajouté.{!readOnly && ' Appuie sur "+" pour en ajouter un.'}</div>
       )}
 
       {livreurs.length > 1 && (
@@ -1815,9 +1815,11 @@ function LivreursView({ livreurs, onDelete }) {
                 </div>
                 <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{l.telephone} · {l.zone}</div>
               </div>
-              <button onClick={() => onDelete(l.id)} style={{ background: "none", border: "none", color: "#D64933", padding: 6 }} aria-label="Retirer">
-                <Trash2 size={17} />
-              </button>
+              {!readOnly && (
+                <button onClick={() => onDelete(l.id)} style={{ background: "none", border: "none", color: "#D64933", padding: 6 }} aria-label="Retirer">
+                  <Trash2 size={17} />
+                </button>
+              )}
             </div>
             <div style={{ display: "flex", gap: 16, marginTop: 10, fontSize: 12.5 }}>
               <span style={{ color: "#6B7168" }}>{l.total} commande{l.total > 1 ? "s" : ""}</span>
