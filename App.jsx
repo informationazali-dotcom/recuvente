@@ -2012,6 +2012,8 @@ function LivreursView({ livreurs, onDelete, readOnly, periodLabel }) {
         </div>
       )}
 
+      <CarteLivreurs livreurs={livreurs} />
+
       {livreurs.length === 0 && (
         <div style={{ textAlign: "center", padding: "40px 0", color: "#8A9089", fontSize: 14 }}>Aucun livreur ajouté.{!readOnly && ' Appuie sur "+" pour en ajouter un.'}</div>
       )}
@@ -3039,6 +3041,58 @@ function LivreurPortal({ livreur, orders, onStatus, toast }) {
   const actives = orders.filter((o) => o.statut === "en_cours" || o.statut === "echouee");
   const confirmees = orders.filter((o) => o.statut === "confirmee");
 
+  const [enTournee, setEnTournee] = useState(!!livreur.en_tournee);
+  const [gpsErreur, setGpsErreur] = useState(null);
+  const watchIdRef = useRef(null);
+
+  async function majPosition(lat, lng) {
+    await supabase.from("livreurs").update({ position_lat: lat, position_lng: lng, position_maj: new Date().toISOString() }).eq("id", livreur.id);
+  }
+
+  function demarrerTournee() {
+    if (!navigator.geolocation) {
+      setGpsErreur("La géolocalisation n'est pas disponible sur cet appareil.");
+      return;
+    }
+    setGpsErreur(null);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        await supabase.from("livreurs").update({ en_tournee: true }).eq("id", livreur.id);
+        await majPosition(pos.coords.latitude, pos.coords.longitude);
+        setEnTournee(true);
+
+        watchIdRef.current = navigator.geolocation.watchPosition(
+          (p) => majPosition(p.coords.latitude, p.coords.longitude),
+          () => {},
+          { enableHighAccuracy: true, maximumAge: 15000, timeout: 20000 }
+        );
+      },
+      (err) => {
+        if (err.code === err.PERMISSION_DENIED) {
+          setGpsErreur("Autorisation de localisation refusée. Active-la dans les réglages de ton téléphone pour démarrer ta tournée.");
+        } else {
+          setGpsErreur("Impossible d'obtenir ta position pour le moment.");
+        }
+      },
+      { enableHighAccuracy: true, timeout: 15000 }
+    );
+  }
+
+  async function terminerTournee() {
+    if (watchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+    await supabase.from("livreurs").update({ en_tournee: false }).eq("id", livreur.id);
+    setEnTournee(false);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
+    };
+  }, []);
+
   return (
     <div style={{ background: "#FAFAF7", minHeight: "100vh", fontFamily: "'IBM Plex Sans', sans-serif", color: "#16231F" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');`}</style>
@@ -3062,6 +3116,34 @@ function LivreurPortal({ livreur, orders, onStatus, toast }) {
         </div>
         <div style={{ fontSize: 13, opacity: 0.8 }}>Bonjour</div>
         <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 22 }}>{livreur.nom}</div>
+
+        <button
+          onClick={enTournee ? terminerTournee : demarrerTournee}
+          style={{
+            width: "100%",
+            marginTop: 14,
+            padding: "13px 0",
+            borderRadius: 10,
+            border: "none",
+            background: enTournee ? "#D64933" : "#e8920a",
+            color: "white",
+            fontWeight: 700,
+            fontSize: 14.5,
+          }}
+        >
+          {enTournee ? "🔴 Terminer ma tournée" : "🟢 Démarrer ma tournée"}
+        </button>
+        {enTournee && (
+          <div style={{ fontSize: 11.5, opacity: 0.8, marginTop: 6, textAlign: "center" }}>
+            📍 Ta position est partagée avec l'administrateur pendant ta tournée
+          </div>
+        )}
+        {gpsErreur && (
+          <div style={{ background: "rgba(214,73,51,0.2)", borderRadius: 8, padding: "8px 10px", marginTop: 8, fontSize: 12 }}>
+            {gpsErreur}
+          </div>
+        )}
+
         <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
           <div style={{ flex: 1, background: "rgba(255,255,255,0.1)", borderRadius: 10, padding: "10px 12px" }}>
             <div style={{ fontSize: 11, opacity: 0.75 }}>À traiter</div>
@@ -3334,6 +3416,76 @@ function CloserPortal({ closer, orders, relanceCountByOrder, onStatus, onResched
         <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: "#16231F", color: "white", padding: "9px 18px", borderRadius: 999, fontSize: 13, fontWeight: 500 }}>
           {toast}
         </div>
+      )}
+    </div>
+  );
+}
+
+function CarteLivreurs({ livreurs }) {
+  const mapRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const markersRef = useRef([]);
+
+  const enTourneeAvecPosition = livreurs.filter(
+    (l) => l.en_tournee && l.position_lat && l.position_lng
+  );
+
+  useEffect(() => {
+    if (!window.L || !mapRef.current) return;
+
+    if (!mapInstanceRef.current) {
+      mapInstanceRef.current = window.L.map(mapRef.current, {
+        zoomControl: true,
+        attributionControl: true,
+      }).setView([5.359952, -4.008256], 12); // Abidjan par défaut
+
+      window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: "© OpenStreetMap",
+        maxZoom: 19,
+      }).addTo(mapInstanceRef.current);
+    }
+
+    markersRef.current.forEach((m) => m.remove());
+    markersRef.current = [];
+
+    const icon = window.L.divIcon({
+      html: `<div style="background:#1a7a3c;width:16px;height:16px;border-radius:50%;border:3px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.3);"></div>`,
+      className: "",
+      iconSize: [16, 16],
+      iconAnchor: [8, 8],
+    });
+
+    enTourneeAvecPosition.forEach((l) => {
+      const marker = window.L.marker([l.position_lat, l.position_lng], { icon })
+        .addTo(mapInstanceRef.current)
+        .bindPopup(`<strong>${l.nom}</strong><br/>En tournée`);
+      markersRef.current.push(marker);
+    });
+
+    if (enTourneeAvecPosition.length > 0) {
+      const bounds = window.L.latLngBounds(enTourneeAvecPosition.map((l) => [l.position_lat, l.position_lng]));
+      mapInstanceRef.current.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
+    }
+
+    setTimeout(() => mapInstanceRef.current && mapInstanceRef.current.invalidateSize(), 100);
+  }, [JSON.stringify(enTourneeAvecPosition.map((l) => [l.id, l.position_lat, l.position_lng]))]);
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <div style={{ fontSize: 11, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em" }}>
+          Livreurs en tournée en direct
+        </div>
+        {enTourneeAvecPosition.length > 0 && (
+          <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#1F9D6E", display: "inline-block", animation: "rvPulseDot 2s ease-in-out infinite" }} />
+        )}
+      </div>
+      <div
+        ref={mapRef}
+        style={{ width: "100%", height: 220, borderRadius: 12, overflow: "hidden", border: "1px solid #ECE8DC", background: "#EEF0EA" }}
+      />
+      {enTourneeAvecPosition.length === 0 && (
+        <div style={{ fontSize: 12, color: "#8A9089", marginTop: 6 }}>Aucun livreur en tournée pour le moment.</div>
       )}
     </div>
   );
