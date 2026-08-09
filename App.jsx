@@ -1669,6 +1669,17 @@ function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, clos
           <div style={{ fontSize: 13.5, marginTop: 6, lineHeight: 1.5 }}>{scriptAppel(order)}</div>
         </div>
 
+        {order.statut !== "confirmee" && (
+          <a
+            href={`https://wa.me/${cleanPhoneForWhatsApp(order.tel)}?text=${encodeURIComponent(`Bonjour ${order.client.split(" ")[0]} 👋, suivez votre commande en direct ici : ${window.location.origin}/?suivi=${order.id}`)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: "white", border: "1px solid #DDD8CC", color: "#16231F", padding: "12px 0", borderRadius: 10, fontWeight: 600, fontSize: 13.5, textDecoration: "none", marginBottom: 14 }}
+          >
+            🔗 Envoyer le lien de suivi au client
+          </a>
+        )}
+
         {order.statut === "confirmee" && (
           <a
             href={merciWaLink(order)}
