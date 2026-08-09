@@ -1263,7 +1263,7 @@ export default function App() {
           </svg>
         </div>
         <div style={{ position: "relative", zIndex: 1 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: 8, rowGap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
             <div style={{ width: 24, height: 24, borderRadius: 7, background: "rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
               <svg width="14" height="14" viewBox="0 0 100 100">
@@ -1278,7 +1278,7 @@ export default function App() {
               <span style={{ fontSize: 9.5, fontWeight: 500, letterSpacing: "0.03em" }}>EN DIRECT</span>
             </div>
           </div>
-          <div className="rv-mobile-only-logout" style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
+          <div className="rv-mobile-only-logout" style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-end", alignItems: "center", gap: 5, flexShrink: 0, rowGap: 6 }}>
             {session.user.email === ADMIN_EMAIL && (
               <>
                 <button
