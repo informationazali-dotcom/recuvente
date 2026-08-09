@@ -214,12 +214,15 @@ export default function App() {
   const [orders, setOrders] = useState([]);
   const [livreurs, setLivreurs] = useState([]);
   const [closers, setClosers] = useState([]);
+  const [comptables, setComptables] = useState([]);
   const [view, setView] = useState("dashboard");
   const [filter, setFilter] = useState("toutes");
   const [selected, setSelected] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
   const [showAddLivreur, setShowAddLivreur] = useState(false);
   const [showAddCloser, setShowAddCloser] = useState(false);
+  const [showAddComptable, setShowAddComptable] = useState(false);
+  const [showComptables, setShowComptables] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
   const [showTeam, setShowTeam] = useState(false);
   const [showBatch, setShowBatch] = useState(false);
@@ -229,6 +232,7 @@ export default function App() {
   const [ordersLoaded, setOrdersLoaded] = useState(false);
   const [livreursLoaded, setLivreursLoaded] = useState(false);
   const [closersLoaded, setClosersLoaded] = useState(false);
+  const [comptablesLoaded, setComptablesLoaded] = useState(false);
   const [toast, setToast] = useState(null);
   const [error, setError] = useState(null);
   const [datePreset, setDatePreset] = useState("aujourdhui");
@@ -356,6 +360,15 @@ export default function App() {
     setClosersLoaded(true);
   }
 
+  async function loadComptables() {
+    const { data, error } = await supabase
+      .from("comptables")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (!error) setComptables(data || []);
+    setComptablesLoaded(true);
+  }
+
   const [allRelances, setAllRelances] = useState([]);
 
   async function loadRelances() {
@@ -370,17 +383,19 @@ export default function App() {
     loadOrders();
     loadLivreurs();
     loadClosers();
+    loadComptables();
     loadRelances();
     const interval = setInterval(() => {
       loadOrders();
       loadLivreurs();
       loadClosers();
+      loadComptables();
       loadRelances();
     }, 15000);
     return () => clearInterval(interval);
   }, []);
 
-  const loaded = ordersLoaded && livreursLoaded && closersLoaded;
+  const loaded = ordersLoaded && livreursLoaded && closersLoaded && comptablesLoaded;
 
   function showToast(msg) {
     setToast(msg);
@@ -683,6 +698,27 @@ export default function App() {
     showToast("Closer retiré");
   }
 
+  async function addComptable(comptable) {
+    const { error } = await supabase.from("comptables").insert([comptable]);
+    if (error) {
+      showToast("Erreur: " + error.message);
+      return;
+    }
+    await loadComptables();
+    setShowAddComptable(false);
+    showToast("Comptable ajouté");
+  }
+
+  async function deleteComptable(id) {
+    const { error } = await supabase.from("comptables").delete().eq("id", id);
+    if (error) {
+      showToast("Erreur: " + error.message);
+      return;
+    }
+    await loadComptables();
+    showToast("Comptable retiré");
+  }
+
   async function assignCloser(orderId, closerNom) {
     const { error } = await supabase.from("commandes").update({ closer: closerNom }).eq("id", orderId);
     if (error) {
@@ -834,6 +870,18 @@ export default function App() {
   }
 
   const monProfilCloser = closers.find((c) => c.email && c.email.toLowerCase() === session.user.email.toLowerCase());
+
+  const monProfilComptable = comptables.find((c) => c.email && c.email.toLowerCase() === session.user.email.toLowerCase());
+
+  if (monProfilComptable && !error) {
+    return (
+      <ComptablePortal
+        comptable={monProfilComptable}
+        orders={orders}
+        livreurs={livreurs}
+      />
+    );
+  }
 
   if (error) {
     return (
@@ -1091,6 +1139,12 @@ export default function App() {
               >
                 <MessageCircle size={13} /> Campagne promo
               </button>
+              <button
+                onClick={() => setShowComptables(true)}
+                style={{ width: "100%", padding: "8px 0", borderRadius: 9, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "rgba(255,255,255,0.75)", fontWeight: 500, fontSize: 12.5, marginBottom: 6, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+              >
+                🧮 Gérer comptables
+              </button>
             </>
           )}
           <button
@@ -1161,6 +1215,13 @@ export default function App() {
                   style={{ background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: 7, borderRadius: 7, display: "flex" }}
                 >
                   <MessageCircle size={15} />
+                </button>
+                <button
+                  onClick={() => setShowComptables(true)}
+                  aria-label="Comptables"
+                  style={{ background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: 7, borderRadius: 7, display: "flex", fontSize: 14 }}
+                >
+                  🧮
                 </button>
               </>
             )}
@@ -1639,6 +1700,8 @@ export default function App() {
         />
       )}
       {showCampagne && <CampagneModal clients={clients} onClose={() => setShowCampagne(false)} />}
+      {showComptables && <ComptablesModal comptables={comptables} onDelete={deleteComptable} onAddClick={() => setShowAddComptable(true)} onClose={() => setShowComptables(false)} />}
+      {showAddComptable && <AddComptable onClose={() => setShowAddComptable(false)} onAdd={addComptable} />}
       {selectedClient && <ClientDetail client={selectedClient} onClose={() => setSelectedClient(null)} onSelectOrder={(o) => { setSelectedClient(null); setView("dashboard"); setSelected(o); }} />}
     </div>
   );
@@ -3547,6 +3610,292 @@ function CarteLivreurs({ livreurs }) {
       {enTourneeAvecPosition.length === 0 && (
         <div style={{ fontSize: 12, color: "#8A9089", marginTop: 6 }}>Aucun livreur en tournée pour le moment.</div>
       )}
+    </div>
+  );
+}
+
+function ComptablesModal({ comptables, onDelete, onAddClick, onClose }) {
+  return (
+    <div className="rv-modal-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", zIndex: 50 }} onClick={onClose}>
+      <div className="rv-modal-sheet" onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", maxHeight: "80vh", overflowY: "auto", borderRadius: "18px 18px 0 0", padding: "18px 20px 28px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 19 }}>Comptables</div>
+          <button onClick={onClose} style={{ background: "none", border: "none" }}><X size={20} /></button>
+        </div>
+
+        <div style={{ fontSize: 12.5, color: "#6B7168", marginBottom: 14 }}>
+          Accès en lecture seule à la comptabilité (commandes, montants, dépôts) — aucune modification possible, aucune gestion d'équipe.
+        </div>
+
+        <button
+          onClick={onAddClick}
+          style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none", background: "#1a7a3c", color: "white", fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginBottom: 16 }}
+        >
+          <Plus size={17} /> Ajouter un comptable
+        </button>
+
+        {comptables.length === 0 && (
+          <div style={{ textAlign: "center", padding: "30px 0", color: "#8A9089", fontSize: 14 }}>Aucun comptable ajouté.</div>
+        )}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {comptables.map((c) => (
+            <div key={c.id} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>{c.nom}</div>
+                <div style={{ fontSize: 12, color: "#6B7168", marginTop: 2 }}>{c.email || "Pas d'email — pas encore de connexion possible"}</div>
+              </div>
+              <button onClick={() => onDelete(c.id)} style={{ background: "none", border: "none", color: "#D64933", padding: 6 }} aria-label="Retirer">
+                <Trash2 size={17} />
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AddComptable({ onClose, onAdd }) {
+  const [form, setForm] = useState({ nom: "", email: "", telephone: "" });
+  const canSubmit = form.nom;
+
+  return (
+    <div className="rv-modal-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", zIndex: 55 }} onClick={onClose}>
+      <div className="rv-modal-sheet" onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", borderRadius: "18px 18px 0 0", padding: "18px 20px 28px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 19 }}>Nouveau comptable</div>
+          <button onClick={onClose} style={{ background: "none", border: "none" }}><X size={20} /></button>
+        </div>
+
+        <div style={{ marginBottom: 10 }}>
+          <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4 }}>Nom</label>
+          <input
+            value={form.nom}
+            onChange={(e) => setForm({ ...form, nom: e.target.value })}
+            style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, background: "white" }}
+          />
+        </div>
+
+        <div style={{ marginBottom: 10 }}>
+          <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4 }}>Email de connexion</label>
+          <input
+            type="email"
+            value={form.email}
+            onChange={(e) => setForm({ ...form, email: e.target.value })}
+            placeholder="pour lui donner accès à la comptabilité"
+            style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, background: "white" }}
+          />
+          <div style={{ fontSize: 11, color: "#8A9089", marginTop: 4 }}>
+            Crée-lui d'abord un compte via "Inviter", avec ce même email.
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 10 }}>
+          <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4 }}>Téléphone (optionnel)</label>
+          <input
+            value={form.telephone}
+            onChange={(e) => setForm({ ...form, telephone: e.target.value })}
+            style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, background: "white" }}
+          />
+        </div>
+
+        <button
+          disabled={!canSubmit}
+          onClick={() => canSubmit && onAdd(form)}
+          style={{ width: "100%", marginTop: 6, padding: "13px 0", borderRadius: 10, border: "none", background: canSubmit ? "#1a7a3c" : "#DDD8CC", color: "white", fontWeight: 600, fontSize: 14.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+        >
+          <Check size={17} /> Ajouter le comptable
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ComptablePortal({ comptable, orders, livreurs }) {
+  const [datePreset, setDatePreset] = useState("aujourdhui");
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
+
+  const dateRange = useMemo(() => {
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    let start, end;
+    if (datePreset === "aujourdhui") {
+      start = startOfToday;
+      end = new Date(startOfToday.getTime() + 86400000);
+    } else if (datePreset === "hier") {
+      start = new Date(startOfToday.getTime() - 86400000);
+      end = startOfToday;
+    } else if (datePreset === "semaine") {
+      const day = startOfToday.getDay();
+      const diff = day === 0 ? 6 : day - 1;
+      start = new Date(startOfToday.getTime() - diff * 86400000);
+      end = new Date(now.getTime() + 60000);
+    } else if (datePreset === "mois") {
+      start = new Date(now.getFullYear(), now.getMonth(), 1);
+      end = new Date(now.getTime() + 60000);
+    } else if (datePreset === "personnalise" && customStart && customEnd) {
+      start = new Date(customStart + "T00:00:00");
+      end = new Date(customEnd + "T23:59:59");
+    } else {
+      start = new Date(0);
+      end = new Date(now.getTime() + 60000);
+    }
+    return { start, end };
+  }, [datePreset, customStart, customEnd]);
+
+  const ordersInRange = useMemo(() => {
+    return orders.filter((o) => {
+      const d = new Date(o.created_at);
+      return d >= dateRange.start && d < dateRange.end;
+    });
+  }, [orders, dateRange]);
+
+  const COUT_LIVRAISON = 1500;
+
+  const stats = useMemo(() => {
+    const confirmees = ordersInRange.filter((o) => o.statut === "confirmee");
+    const echouees = ordersInRange.filter((o) => o.statut === "echouee");
+    const enCours = ordersInRange.filter((o) => o.statut === "en_cours");
+    const chiffreAffaires = ordersInRange.reduce((s, o) => s + Number(o.montant), 0);
+    const montantConfirme = confirmees.reduce((s, o) => s + Number(o.montant), 0);
+    const coutLivraisons = confirmees.length * COUT_LIVRAISON;
+    const beneficeReel = montantConfirme - coutLivraisons;
+    return { total: ordersInRange.length, confirmees: confirmees.length, echouees: echouees.length, enCours: enCours.length, chiffreAffaires, montantConfirme, coutLivraisons, beneficeReel };
+  }, [ordersInRange]);
+
+  const livreursStats = useMemo(() => {
+    return livreurs
+      .map((l) => {
+        const mesCommandes = ordersInRange.filter((o) => o.livreur === l.nom);
+        const livrees = mesCommandes.filter((o) => o.statut === "confirmee");
+        const montantRecupere = livrees.reduce((s, o) => s + Number(o.montant), 0);
+        const montantDu = livrees.length * COUT_LIVRAISON;
+        const montantADeposer = montantRecupere - montantDu;
+        return { ...l, livrees: livrees.length, montantRecupere, montantDu, montantADeposer };
+      })
+      .filter((l) => l.livrees > 0)
+      .sort((a, b) => b.montantADeposer - a.montantADeposer);
+  }, [livreurs, ordersInRange]);
+
+  const totalDu = livreursStats.reduce((s, l) => s + l.montantDu, 0);
+  const totalADeposer = livreursStats.reduce((s, l) => s + l.montantADeposer, 0);
+
+  return (
+    <div style={{ background: "#FAFAF7", minHeight: "100vh", fontFamily: "'IBM Plex Sans', sans-serif", color: "#16231F", paddingBottom: 30 }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');`}</style>
+
+      <div style={{ background: "#16231F", color: "white", padding: "22px 20px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 16 }}>
+          <div style={{ width: 26, height: 26, borderRadius: 7, background: "rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>
+            🧮
+          </div>
+          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 17 }}>
+            RECU<span style={{ color: "#e8920a" }}>VENTE</span> — Comptabilité
+          </div>
+          <button
+            onClick={() => supabase.auth.signOut()}
+            style={{ marginLeft: "auto", background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: "6px 12px", borderRadius: 7, fontSize: 12, fontWeight: 500 }}
+          >
+            Déconnexion
+          </button>
+        </div>
+        <div style={{ fontSize: 13, opacity: 0.7 }}>Bonjour {comptable.nom}</div>
+      </div>
+
+      <div style={{ margin: "16px 20px 0", display: "flex", gap: 7, overflowX: "auto" }}>
+        {[
+          { key: "aujourdhui", label: "Aujourd'hui" },
+          { key: "hier", label: "Hier" },
+          { key: "semaine", label: "Cette semaine" },
+          { key: "mois", label: "Ce mois" },
+          { key: "personnalise", label: "Personnalisé" },
+        ].map((d) => (
+          <button
+            key={d.key}
+            onClick={() => setDatePreset(d.key)}
+            style={{
+              padding: "6px 13px",
+              borderRadius: 999,
+              border: "1px solid " + (datePreset === d.key ? "#1a7a3c" : "#DDD8CC"),
+              background: datePreset === d.key ? "#1a7a3c" : "white",
+              color: datePreset === d.key ? "white" : "#16231F",
+              fontSize: 12.5,
+              fontWeight: 500,
+              whiteSpace: "nowrap",
+              flexShrink: 0,
+            }}
+          >
+            {d.label}
+          </button>
+        ))}
+      </div>
+
+      {datePreset === "personnalise" && (
+        <div style={{ margin: "8px 20px 0", display: "flex", gap: 8, alignItems: "center" }}>
+          <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 13 }} />
+          <span style={{ color: "#8A9089", fontSize: 12 }}>à</span>
+          <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 13 }} />
+        </div>
+      )}
+
+      <div style={{ margin: "16px 20px 0", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "12px 14px" }}>
+          <div style={{ fontSize: 11, color: "#8A9089", textTransform: "uppercase" }}>Chiffre d'affaires</div>
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 18, marginTop: 3 }}>{formatFCFA(stats.chiffreAffaires)}</div>
+        </div>
+        <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "12px 14px" }}>
+          <div style={{ fontSize: 11, color: "#8A9089", textTransform: "uppercase" }}>Commandes</div>
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 18, marginTop: 3 }}>{stats.total}</div>
+        </div>
+      </div>
+
+      <div style={{ margin: "10px 20px 0" }}>
+        <div style={{ background: "linear-gradient(135deg, #16231F, #1e2f28)", borderRadius: 14, padding: "16px 18px" }}>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.65)", textTransform: "uppercase" }}>💰 Bénéfice réel</div>
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 24, color: stats.beneficeReel >= 0 ? "#7fd6a3" : "#f0a0a0", marginTop: 3 }}>
+            {formatFCFA(stats.beneficeReel)}
+          </div>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", marginTop: 4 }}>
+            CA confirmé {formatFCFA(stats.montantConfirme)} − Livraisons ({stats.confirmees} × {formatFCFA(COUT_LIVRAISON)})
+          </div>
+        </div>
+      </div>
+
+      <div style={{ margin: "16px 20px 0", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <div style={{ background: "linear-gradient(135deg, #16231F, #1e2f28)", borderRadius: 14, padding: "14px 16px" }}>
+          <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.65)", textTransform: "uppercase" }}>💵 À payer aux livreurs</div>
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 19, color: "#e8920a", marginTop: 3 }}>{formatFCFA(totalDu)}</div>
+        </div>
+        <div style={{ background: "linear-gradient(135deg, #1a7a3c, #1F9D6E)", borderRadius: 14, padding: "14px 16px" }}>
+          <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.75)", textTransform: "uppercase" }}>🏦 Dépôt attendu</div>
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 19, color: "white", marginTop: 3 }}>{formatFCFA(totalADeposer)}</div>
+        </div>
+      </div>
+
+      <div style={{ padding: "20px 20px 0" }}>
+        <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>Détail par livreur</div>
+        {livreursStats.length === 0 && (
+          <div style={{ textAlign: "center", padding: "30px 0", color: "#8A9089", fontSize: 14 }}>Aucune livraison sur cette période.</div>
+        )}
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {livreursStats.map((l) => (
+            <div key={l.id} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "14px 16px" }}>
+              <div style={{ fontWeight: 600, fontSize: 15 }}>{l.nom}</div>
+              <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{l.livrees} livraison{l.livrees > 1 ? "s" : ""} · {formatFCFA(l.montantRecupere)} encaissé</div>
+              <div style={{ marginTop: 8, background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 8, padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 12, color: "#8A6412", fontWeight: 600 }}>💵 Sa commission</span>
+                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 14, color: "#8A6412" }}>{formatFCFA(l.montantDu)}</span>
+              </div>
+              <div style={{ marginTop: 6, background: "#EAF3DE", border: "1px solid #C7DDA3", borderRadius: 8, padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 12, color: "#3B6D11", fontWeight: 600 }}>🏦 Doit déposer</span>
+                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 14, color: "#3B6D11" }}>{formatFCFA(l.montantADeposer)}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
