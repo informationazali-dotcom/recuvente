@@ -59,6 +59,26 @@ function smsMsg(order) {
   return `Azali Express: Bonjour ${order.client.split(" ")[0]}, votre commande ${order.produit} (${formatFCFA(order.montant)}) sera livree bientot. Merci de rester joignable. Repondez OK pour confirmer.`;
 }
 
+function merciMsg(order) {
+  const date = new Date(order.created_at).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
+  return `Bonjour ${order.client.split(" ")[0]} 🙏, merci d'avoir commandé chez Azali Express !
+
+🧾 Reçu de votre commande
+Produit : ${order.produit}
+Montant : ${formatFCFA(order.montant)}
+Date : ${date}
+
+Votre colis vous a été livré avec succès ✅
+
+N'hésitez pas à découvrir nos autres produits : https://www.azaliexpress.com
+
+Merci pour votre confiance, à très bientôt ! 💚`;
+}
+
+function merciWaLink(order) {
+  return `https://wa.me/${cleanPhoneForWhatsApp(order.tel)}?text=${encodeURIComponent(merciMsg(order))}`;
+}
+
 export default function App() {
   const [session, setSession] = useState(undefined);
   const [orders, setOrders] = useState([]);
@@ -1626,6 +1646,17 @@ function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, clos
           </div>
           <div style={{ fontSize: 13.5, marginTop: 6, lineHeight: 1.5 }}>{scriptAppel(order)}</div>
         </div>
+
+        {order.statut === "confirmee" && (
+          <a
+            href={merciWaLink(order)}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: "linear-gradient(135deg, #e8920a, #f0b94a)", color: "white", padding: "13px 0", borderRadius: 10, fontWeight: 700, fontSize: 14, textDecoration: "none", marginBottom: 14 }}
+          >
+            🙏 Envoyer message de remerciement + reçu
+          </a>
+        )}
 
         <div style={{ display: "flex", gap: 10 }}>
           <a href={waLink(order)} target="_blank" rel="noopener noreferrer" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, background: "#1F9D6E", color: "white", padding: "12px 0", borderRadius: 10, fontWeight: 600, fontSize: 14, textDecoration: "none" }}>
