@@ -776,6 +776,7 @@ export default function App() {
       return;
     }
     await loadProduits();
+    setShowAddProduit(false);
     showToast("Produit ajouté");
   }
 
