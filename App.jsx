@@ -439,6 +439,8 @@ export default function App() {
     [ordersPreviousRange]
   );
 
+  const COUT_LIVRAISON = 1500;
+
   const stats = useMemo(() => {
     const confirmees = ordersInRange.filter((o) => o.statut === "confirmee");
     const echouees = ordersInRange.filter((o) => o.statut === "echouee");
@@ -447,6 +449,9 @@ export default function App() {
     const chiffreAffaires = ordersInRange.reduce((sum, o) => sum + Number(o.montant), 0);
     const tauxLivraison = ordersInRange.length ? Math.round((confirmees.length / ordersInRange.length) * 100) : 0;
     const tauxEchec = ordersInRange.length ? Math.round((echouees.length / ordersInRange.length) * 100) : 0;
+    const coutLivraisons = confirmees.length * COUT_LIVRAISON;
+    const montantConfirme = confirmees.reduce((sum, o) => sum + Number(o.montant), 0);
+    const beneficeReel = montantConfirme - coutLivraisons;
     return {
       recupere,
       chiffreAffaires,
@@ -457,6 +462,8 @@ export default function App() {
       livrees: confirmees.length,
       enAttente: enCours.length,
       echouees: echouees.length,
+      coutLivraisons,
+      beneficeReel,
     };
   }, [ordersInRange]);
 
@@ -1258,6 +1265,23 @@ export default function App() {
         <div className="rv-3d-card-light" style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "12px 14px", boxShadow: "0 6px 16px rgba(22,35,31,0.06)", animationDelay: "-3s" }}>
           <div style={{ fontSize: 11, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em" }}>Taux d'échec</div>
           <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 18, marginTop: 3, color: "#D64933" }}>{stats.tauxEchec}%</div>
+        </div>
+      </div>
+
+      <div style={{ margin: "10px 20px 0" }}>
+        <div className="rv-3d-card-light" style={{ background: "linear-gradient(135deg, #16231F, #1e2f28)", borderRadius: 14, padding: "16px 18px", boxShadow: "0 8px 22px rgba(22,35,31,0.18)", animationDelay: "-1.5s" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div>
+              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.65)", textTransform: "uppercase", letterSpacing: "0.03em" }}>💰 Bénéfice réel</div>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 26, marginTop: 3, color: stats.beneficeReel >= 0 ? "#7fd6a3" : "#f0a0a0" }}>
+                {formatFCFA(stats.beneficeReel)}
+              </div>
+            </div>
+            <div style={{ textAlign: "right", fontSize: 11, color: "rgba(255,255,255,0.55)" }}>
+              <div>CA confirmé : {formatFCFA(stats.livrees * COUT_LIVRAISON + stats.beneficeReel)}</div>
+              <div style={{ marginTop: 2 }}>− Livraisons : {stats.livrees} × {formatFCFA(COUT_LIVRAISON)}</div>
+            </div>
+          </div>
         </div>
       </div>
 
