@@ -223,6 +223,7 @@ export default function App() {
   const [showAddCloser, setShowAddCloser] = useState(false);
   const [showAddComptable, setShowAddComptable] = useState(false);
   const [showComptables, setShowComptables] = useState(false);
+  const [showComptaDetail, setShowComptaDetail] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
   const [showTeam, setShowTeam] = useState(false);
   const [showBatch, setShowBatch] = useState(false);
@@ -1332,7 +1333,11 @@ export default function App() {
       </div>
 
       <div style={{ margin: "10px 20px 0" }}>
-        <div className="rv-3d-card-light" style={{ background: "linear-gradient(135deg, #16231F, #1e2f28)", borderRadius: 14, padding: "16px 18px", boxShadow: "0 8px 22px rgba(22,35,31,0.18)", animationDelay: "-1.5s" }}>
+        <button
+          onClick={() => setShowComptaDetail(true)}
+          className="rv-3d-card-light"
+          style={{ background: "linear-gradient(135deg, #16231F, #1e2f28)", borderRadius: 14, padding: "16px 18px", boxShadow: "0 8px 22px rgba(22,35,31,0.18)", animationDelay: "-1.5s", width: "100%", border: "none", textAlign: "left" }}
+        >
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
             <div>
               <div style={{ fontSize: 11, color: "rgba(255,255,255,0.65)", textTransform: "uppercase", letterSpacing: "0.03em" }}>💰 Bénéfice réel</div>
@@ -1343,9 +1348,10 @@ export default function App() {
             <div style={{ textAlign: "right", fontSize: 11, color: "rgba(255,255,255,0.55)" }}>
               <div>CA confirmé : {formatFCFA(stats.livrees * COUT_LIVRAISON + stats.beneficeReel)}</div>
               <div style={{ marginTop: 2 }}>− Livraisons : {stats.livrees} × {formatFCFA(COUT_LIVRAISON)}</div>
+              <div style={{ marginTop: 6, color: "#e8920a", fontWeight: 600 }}>Voir le détail →</div>
             </div>
           </div>
-        </div>
+        </button>
       </div>
 
       {clientsSuspects.length > 0 && (
@@ -1702,6 +1708,15 @@ export default function App() {
       {showCampagne && <CampagneModal clients={clients} onClose={() => setShowCampagne(false)} />}
       {showComptables && <ComptablesModal comptables={comptables} onDelete={deleteComptable} onAddClick={() => setShowAddComptable(true)} onClose={() => setShowComptables(false)} />}
       {showAddComptable && <AddComptable onClose={() => setShowAddComptable(false)} onAdd={addComptable} />}
+      {showComptaDetail && (
+        <ComptaDetailModal
+          stats={stats}
+          livreursStats={livreursStats}
+          coutLivraison={COUT_LIVRAISON}
+          periodLabel={periodLabel}
+          onClose={() => setShowComptaDetail(false)}
+        />
+      )}
       {selectedClient && <ClientDetail client={selectedClient} onClose={() => setSelectedClient(null)} onSelectOrder={(o) => { setSelectedClient(null); setView("dashboard"); setSelected(o); }} />}
     </div>
   );
@@ -3891,6 +3906,67 @@ function ComptablePortal({ comptable, orders, livreurs }) {
               <div style={{ marginTop: 6, background: "#EAF3DE", border: "1px solid #C7DDA3", borderRadius: 8, padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <span style={{ fontSize: 12, color: "#3B6D11", fontWeight: 600 }}>🏦 Doit déposer</span>
                 <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 14, color: "#3B6D11" }}>{formatFCFA(l.montantADeposer)}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ComptaDetailModal({ stats, livreursStats, coutLivraison, periodLabel, onClose }) {
+  const actifs = livreursStats.filter((l) => l.livrees > 0);
+  const totalDu = actifs.reduce((s, l) => s + (l.montantDu || 0), 0);
+  const totalADeposer = actifs.reduce((s, l) => s + (l.montantRecupere - (l.montantDu || 0)), 0);
+
+  return (
+    <div className="rv-modal-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.6)", display: "flex", alignItems: "flex-end", zIndex: 55 }} onClick={onClose}>
+      <div className="rv-modal-sheet" onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", maxHeight: "85vh", overflowY: "auto", borderRadius: "18px 18px 0 0", padding: "18px 20px 28px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 19 }}>Comptabilité détaillée</div>
+          <button onClick={onClose} style={{ background: "none", border: "none" }}><X size={20} /></button>
+        </div>
+        {periodLabel && (
+          <div style={{ display: "inline-block", fontSize: 11, fontWeight: 600, color: "#1a7a3c", background: "#EAF3DE", padding: "3px 10px", borderRadius: 999, marginBottom: 16 }}>
+            📊 {periodLabel}
+          </div>
+        )}
+
+        <div style={{ background: "linear-gradient(135deg, #16231F, #1e2f28)", borderRadius: 14, padding: "16px 18px", marginBottom: 12 }}>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.65)", textTransform: "uppercase" }}>💰 Bénéfice réel</div>
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 24, color: stats.beneficeReel >= 0 ? "#7fd6a3" : "#f0a0a0", marginTop: 3 }}>
+            {formatFCFA(stats.beneficeReel)}
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
+          <div style={{ background: "linear-gradient(135deg, #16231F, #1e2f28)", borderRadius: 14, padding: "14px 16px" }}>
+            <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.65)", textTransform: "uppercase" }}>💵 À payer aux livreurs</div>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 19, color: "#e8920a", marginTop: 3 }}>{formatFCFA(totalDu)}</div>
+          </div>
+          <div style={{ background: "linear-gradient(135deg, #1a7a3c, #1F9D6E)", borderRadius: 14, padding: "14px 16px" }}>
+            <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.75)", textTransform: "uppercase" }}>🏦 Dépôt attendu</div>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 19, color: "white", marginTop: 3 }}>{formatFCFA(totalADeposer)}</div>
+          </div>
+        </div>
+
+        <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>Détail par livreur</div>
+        {actifs.length === 0 && (
+          <div style={{ textAlign: "center", padding: "20px 0", color: "#8A9089", fontSize: 13.5 }}>Aucune livraison sur cette période.</div>
+        )}
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {actifs.map((l) => (
+            <div key={l.id} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "12px 14px" }}>
+              <div style={{ fontWeight: 600, fontSize: 14 }}>{l.nom}</div>
+              <div style={{ fontSize: 12, color: "#6B7168", marginTop: 2 }}>{l.livrees} livraison{l.livrees > 1 ? "s" : ""} · {formatFCFA(l.montantRecupere)} encaissé</div>
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <div style={{ flex: 1, background: "#FBF3E3", borderRadius: 7, padding: "6px 9px", fontSize: 11.5, color: "#8A6412" }}>
+                  Commission : <strong>{formatFCFA(l.montantDu)}</strong>
+                </div>
+                <div style={{ flex: 1, background: "#EAF3DE", borderRadius: 7, padding: "6px 9px", fontSize: 11.5, color: "#3B6D11" }}>
+                  À déposer : <strong>{formatFCFA(l.montantRecupere - l.montantDu)}</strong>
+                </div>
               </div>
             </div>
           ))}
