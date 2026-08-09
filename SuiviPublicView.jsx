@@ -18,6 +18,15 @@ const ETAPES = [
 export default function SuiviPublicView({ commandeId }) {
   const [commande, setCommande] = useState(undefined);
   const [erreur, setErreur] = useState(null);
+  const [confirme, setConfirme] = useState(false);
+  const [envoiEnCours, setEnvoiEnCours] = useState(false);
+
+  async function confirmerReception() {
+    setEnvoiEnCours(true);
+    const { error } = await supabase.rpc("confirmer_reception", { p_id: commandeId });
+    if (!error) setConfirme(true);
+    setEnvoiEnCours(false);
+  }
 
   useEffect(() => {
     supabase
@@ -131,6 +140,24 @@ export default function SuiviPublicView({ commandeId }) {
             {commande.date_relivraison && etapeActuelle !== 1 && (
               <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 4 }}>
                 📅 Livraison prévue le {new Date(commande.date_relivraison + "T00:00:00").toLocaleDateString("fr-FR", { day: "numeric", month: "long" })}
+              </div>
+            )}
+
+            {etapeActuelle === 1 && (
+              <div style={{ marginTop: 16 }}>
+                {!confirme ? (
+                  <button
+                    onClick={confirmerReception}
+                    disabled={envoiEnCours}
+                    style={{ width: "100%", background: "#1a7a3c", color: "white", border: "none", padding: "13px 0", borderRadius: 10, fontWeight: 700, fontSize: 14, opacity: envoiEnCours ? 0.6 : 1 }}
+                  >
+                    {envoiEnCours ? "..." : "✅ J'ai bien reçu ma commande"}
+                  </button>
+                ) : (
+                  <div style={{ background: "#EAF3DE", border: "1px solid #C7DDA3", borderRadius: 10, padding: "12px 0", textAlign: "center", color: "#3B6D11", fontWeight: 600, fontSize: 13.5 }}>
+                    Merci pour votre confirmation ! 🙏
+                  </div>
+                )}
               </div>
             )}
 
