@@ -192,7 +192,21 @@ function genererFacturePDF(order) {
   doc.text("Merci pour votre confiance — Azali Express", 105, 280, { align: "center" });
   doc.text("Paiement à la livraison (COD) — Facture générée automatiquement", 105, 285, { align: "center" });
 
-  doc.save(`Facture-${numeroFacture(order)}.pdf`);
+  const nomFichier = `Facture-${numeroFacture(order)}.pdf`;
+  const blob = doc.output("blob");
+  const fichier = new File([blob], nomFichier, { type: "application/pdf" });
+
+  if (navigator.canShare && navigator.canShare({ files: [fichier] })) {
+    navigator.share({
+      files: [fichier],
+      title: nomFichier,
+      text: `Voici votre facture Azali Express — ${order.produit}`,
+    }).catch(() => {
+      doc.save(nomFichier);
+    });
+  } else {
+    doc.save(nomFichier);
+  }
 }
 
 export default function App() {
@@ -1811,7 +1825,7 @@ function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, clos
           onClick={() => genererFacturePDF(order)}
           style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: "white", border: "1px solid #DDD8CC", color: "#16231F", padding: "12px 0", borderRadius: 10, fontWeight: 600, fontSize: 13.5, marginBottom: 14 }}
         >
-          🧾 Télécharger la facture PDF
+          🧾 Envoyer / Télécharger la facture PDF
         </button>
 
         <div style={{ display: "flex", gap: 10 }}>
