@@ -550,7 +550,7 @@ export default function App() {
 
   const livreursStats = useMemo(() => {
     const stats = livreurs.map((l) => {
-      const mesCommandes = orders.filter((o) => o.livreur === l.nom);
+      const mesCommandes = ordersInRange.filter((o) => o.livreur === l.nom);
       const livrees = mesCommandes.filter((o) => o.statut === "confirmee");
       const echouees = mesCommandes.filter((o) => o.statut === "echouee");
       const total = mesCommandes.length;
@@ -560,11 +560,11 @@ export default function App() {
       return { ...l, total, livrees: livrees.length, echouees: echouees.length, taux, montantRecupere, montantPerdu };
     });
     return stats.sort((a, b) => (b.taux ?? -1) - (a.taux ?? -1));
-  }, [livreurs, orders]);
+  }, [livreurs, ordersInRange]);
 
   const closersStats = useMemo(() => {
     const stats = closers.map((c) => {
-      const mesCommandes = orders.filter((o) => o.closer === c.nom);
+      const mesCommandes = ordersInRange.filter((o) => o.closer === c.nom);
       const confirmees = mesCommandes.filter((o) => o.statut === "confirmee");
       const echouees = mesCommandes.filter((o) => o.statut === "echouee");
       const enCours = mesCommandes.filter((o) => o.statut === "en_cours");
@@ -574,9 +574,14 @@ export default function App() {
       return { ...c, total, confirmees: confirmees.length, echouees: echouees.length, enCours: enCours.length, taux, montantRecupere };
     });
     return stats.sort((a, b) => (b.taux ?? -1) - (a.taux ?? -1));
-  }, [closers, orders]);
+  }, [closers, ordersInRange]);
 
   const commandesNonAssignees = useMemo(() => orders.filter((o) => !o.closer && (o.statut === "en_cours" || o.statut === "echouee")).length, [orders]);
+
+  const periodLabel = useMemo(() => {
+    const labels = { aujourdhui: "Aujourd'hui", hier: "Hier", semaine: "Cette semaine", mois: "Ce mois", personnalise: "Période personnalisée" };
+    return labels[datePreset] || "";
+  }, [datePreset]);
 
   const clients = useMemo(() => {
     const map = {};
@@ -1321,13 +1326,13 @@ export default function App() {
 
       {view === "livreurs" && (
         <div className="rv-fadein">
-          <LivreursView livreurs={livreursStats} onDelete={deleteLivreur} readOnly={!!monProfilCloser} />
+          <LivreursView livreurs={livreursStats} onDelete={deleteLivreur} readOnly={!!monProfilCloser} periodLabel={periodLabel} />
         </div>
       )}
 
       {view === "closers" && (
         <div className="rv-fadein">
-          <ClosersView closers={closersStats} onDelete={deleteCloser} nonAssignees={commandesNonAssignees} />
+          <ClosersView closers={closersStats} onDelete={deleteCloser} nonAssignees={commandesNonAssignees} periodLabel={periodLabel} />
         </div>
       )}
 
@@ -1773,14 +1778,19 @@ function ClientDetail({ client, onClose, onSelectOrder }) {
   );
 }
 
-function LivreursView({ livreurs, onDelete, readOnly }) {
+function LivreursView({ livreurs, onDelete, readOnly, periodLabel }) {
   const maxTaux = Math.max(...livreurs.map((l) => l.taux ?? 0), 1);
   const medailles = ["🥇", "🥈", "🥉"];
 
   return (
     <div style={{ padding: "20px 20px 8px" }}>
       <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 22, marginBottom: 4 }}>Livreurs</div>
-      <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 18 }}>{livreurs.length} livreur{livreurs.length > 1 ? "s" : ""} · classés par taux de réussite</div>
+      <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 4 }}>{livreurs.length} livreur{livreurs.length > 1 ? "s" : ""} · classés par taux de réussite</div>
+      {periodLabel && (
+        <div style={{ display: "inline-block", fontSize: 11, fontWeight: 600, color: "#1a7a3c", background: "#EAF3DE", padding: "3px 10px", borderRadius: 999, marginBottom: 14 }}>
+          📊 {periodLabel}
+        </div>
+      )}
 
       {livreurs.length === 0 && (
         <div style={{ textAlign: "center", padding: "40px 0", color: "#8A9089", fontSize: 14 }}>Aucun livreur ajouté.{!readOnly && ' Appuie sur "+" pour en ajouter un.'}</div>
@@ -2683,13 +2693,18 @@ function CelebrationOverlay({ montant, client }) {
   );
 }
 
-function ClosersView({ closers, onDelete, nonAssignees }) {
+function ClosersView({ closers, onDelete, nonAssignees, periodLabel }) {
   const maxTaux = Math.max(...closers.map((c) => c.taux ?? 0), 1);
 
   return (
     <div style={{ padding: "20px 20px 8px" }}>
       <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 22, marginBottom: 4 }}>Closers</div>
-      <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 14 }}>{closers.length} closer{closers.length > 1 ? "s" : ""} · classés par taux de confirmation</div>
+      <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 4 }}>{closers.length} closer{closers.length > 1 ? "s" : ""} · classés par taux de confirmation</div>
+      {periodLabel && (
+        <div style={{ display: "inline-block", fontSize: 11, fontWeight: 600, color: "#1a7a3c", background: "#EAF3DE", padding: "3px 10px", borderRadius: 999, marginBottom: 14 }}>
+          📊 {periodLabel}
+        </div>
+      )}
 
       {nonAssignees > 0 && (
         <div style={{ background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 12, padding: "10px 14px", marginBottom: 14, fontSize: 12.5, color: "#8A6412", fontWeight: 600 }}>
