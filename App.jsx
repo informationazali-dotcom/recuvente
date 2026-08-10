@@ -917,7 +917,22 @@ export default function App() {
       const montantPerdu = echouees.reduce((s, o) => s + Number(o.montant), 0);
       const montantDu = livrees.length * 1500;
       const montantADeposer = montantRecupere - montantDu;
-      return { ...l, total, livrees: livrees.length, echouees: echouees.length, taux, montantRecupere, montantPerdu, montantDu, montantADeposer };
+
+      const detailProduits = {};
+      mesCommandes.forEach((o) => {
+        const { nom, quantite } = parseProduitTexte(o.produit);
+        if (!nom) return;
+        if (!detailProduits[nom]) detailProduits[nom] = { nom, assignes: 0, livres: 0, restants: 0 };
+        detailProduits[nom].assignes += quantite;
+        if (o.statut === "confirmee") {
+          detailProduits[nom].livres += quantite;
+        } else {
+          detailProduits[nom].restants += quantite;
+        }
+      });
+      const produitsDetail = Object.values(detailProduits).sort((a, b) => b.assignes - a.assignes);
+
+      return { ...l, total, livrees: livrees.length, echouees: echouees.length, taux, montantRecupere, montantPerdu, montantDu, montantADeposer, produitsDetail };
     });
     return stats.sort((a, b) => (b.taux ?? -1) - (a.taux ?? -1));
   }, [livreurs, ordersInRange]);
@@ -2465,6 +2480,7 @@ function LivreursView({ livreurs, onDelete, readOnly, periodLabel }) {
                 <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 15, color: "#3B6D11" }}>{formatFCFA(l.montantADeposer)}</span>
               </div>
             )}
+            <DetailProduitsLivreur produitsDetail={l.produitsDetail} />
           </div>
         ))}
       </div>
@@ -2474,6 +2490,41 @@ function LivreursView({ livreurs, onDelete, readOnly, periodLabel }) {
 
 function total_ok(l) {
   return l.total > 0;
+}
+
+function DetailProduitsLivreur({ produitsDetail }) {
+  const [open, setOpen] = useState(false);
+  if (!produitsDetail || produitsDetail.length === 0) return null;
+
+  const totalRestant = produitsDetail.reduce((s, p) => s + p.restants, 0);
+
+  return (
+    <div style={{ marginTop: 10 }}>
+      <button
+        onClick={() => setOpen(!open)}
+        style={{ width: "100%", background: "none", border: "1px solid #ECE8DC", borderRadius: 8, padding: "8px 10px", fontSize: 12, fontWeight: 600, color: "#16231F", display: "flex", justifyContent: "space-between", alignItems: "center" }}
+      >
+        <span>📦 Détail par produit ({produitsDetail.length})</span>
+        <span style={{ color: totalRestant > 0 ? "#D64933" : "#8A9089" }}>
+          {totalRestant > 0 ? `${totalRestant} restant${totalRestant > 1 ? "s" : ""}` : "tout livré"} {open ? "▲" : "▼"}
+        </span>
+      </button>
+      {open && (
+        <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 6 }}>
+          {produitsDetail.map((p) => (
+            <div key={p.nom} style={{ background: "#FAFAF7", borderRadius: 7, padding: "7px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 12, fontWeight: 500 }}>{p.nom}</span>
+              <div style={{ display: "flex", gap: 10, fontSize: 11.5 }}>
+                <span style={{ color: "#8A9089" }}>{p.assignes} assignés</span>
+                <span style={{ color: "#1F9D6E" }}>{p.livres} livrés</span>
+                <span style={{ color: p.restants > 0 ? "#D64933" : "#8A9089", fontWeight: 600 }}>{p.restants} restants</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function AddLivreur({ onClose, onAdd }) {
