@@ -946,7 +946,22 @@ export default function App() {
       const total = mesCommandes.length;
       const taux = total ? Math.round((confirmees.length / total) * 100) : null;
       const montantRecupere = confirmees.reduce((s, o) => s + Number(o.montant), 0);
-      return { ...c, total, confirmees: confirmees.length, echouees: echouees.length, enCours: enCours.length, taux, montantRecupere };
+
+      const detailProduits = {};
+      mesCommandes.forEach((o) => {
+        const { nom, quantite } = parseProduitTexte(o.produit);
+        if (!nom) return;
+        if (!detailProduits[nom]) detailProduits[nom] = { nom, assignes: 0, livres: 0, restants: 0 };
+        detailProduits[nom].assignes += quantite;
+        if (o.statut === "confirmee") {
+          detailProduits[nom].livres += quantite;
+        } else {
+          detailProduits[nom].restants += quantite;
+        }
+      });
+      const produitsDetail = Object.values(detailProduits).sort((a, b) => b.assignes - a.assignes);
+
+      return { ...c, total, confirmees: confirmees.length, echouees: echouees.length, enCours: enCours.length, taux, montantRecupere, produitsDetail };
     });
     return stats.sort((a, b) => (b.taux ?? -1) - (a.taux ?? -1));
   }, [closers, ordersInRange]);
@@ -1026,6 +1041,19 @@ export default function App() {
       if (o.statut === "confirmee") map[nomProduit].livrees += 1;
     });
     return Object.values(map).sort((a, b) => b.ventes - a.ventes);
+  }, [ordersInRange]);
+
+  const produitsQuantiteDetail = useMemo(() => {
+    const map = {};
+    ordersInRange.forEach((o) => {
+      const { nom, quantite } = parseProduitTexte(o.produit);
+      if (!nom) return;
+      if (!map[nom]) map[nom] = { nom, assignes: 0, livres: 0, restants: 0 };
+      map[nom].assignes += quantite;
+      if (o.statut === "confirmee") map[nom].livres += quantite;
+      else map[nom].restants += quantite;
+    });
+    return Object.values(map).sort((a, b) => b.assignes - a.assignes);
   }, [ordersInRange]);
 
   const meilleurProduit = produits[0] || null;
@@ -1704,6 +1732,24 @@ export default function App() {
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {produitsQuantiteDetail.length > 0 && (
+        <div style={{ margin: "14px 20px 0", background: "white", border: "1px solid #ECE8DC", borderRadius: 14, padding: "18px 20px" }}>
+          <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 12 }}>📦 Quantités par produit</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {produitsQuantiteDetail.map((p) => (
+              <div key={p.nom} style={{ background: "#FAFAF7", borderRadius: 8, padding: "8px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 500 }}>{p.nom}</span>
+                <div style={{ display: "flex", gap: 10, fontSize: 11.5 }}>
+                  <span style={{ color: "#8A9089" }}>{p.assignes} au total</span>
+                  <span style={{ color: "#1F9D6E" }}>{p.livres} livrés</span>
+                  <span style={{ color: p.restants > 0 ? "#D64933" : "#8A9089", fontWeight: 600 }}>{p.restants} restants</span>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -3465,6 +3511,7 @@ function ClosersView({ closers, onDelete, nonAssignees, periodLabel }) {
             {c.montantRecupere > 0 && (
               <div style={{ marginTop: 6, fontSize: 12.5, color: "#1F9D6E" }}>+{formatFCFA(c.montantRecupere)} récupéré</div>
             )}
+            <DetailProduitsLivreur produitsDetail={c.produitsDetail} />
           </div>
         ))}
       </div>
@@ -3528,6 +3575,19 @@ function AddCloser({ onClose, onAdd }) {
 function LivreurPortal({ livreur, orders, onStatus, toast }) {
   const actives = orders.filter((o) => o.statut === "en_cours" || o.statut === "echouee");
   const confirmees = orders.filter((o) => o.statut === "confirmee");
+
+  const produitsDetail = useMemo(() => {
+    const map = {};
+    orders.forEach((o) => {
+      const { nom, quantite } = parseProduitTexte(o.produit);
+      if (!nom) return;
+      if (!map[nom]) map[nom] = { nom, assignes: 0, livres: 0, restants: 0 };
+      map[nom].assignes += quantite;
+      if (o.statut === "confirmee") map[nom].livres += quantite;
+      else map[nom].restants += quantite;
+    });
+    return Object.values(map).sort((a, b) => b.assignes - a.assignes);
+  }, [orders]);
 
   const [enTournee, setEnTournee] = useState(!!livreur.en_tournee);
   const [gpsErreur, setGpsErreur] = useState(null);
@@ -3652,6 +3712,24 @@ function LivreurPortal({ livreur, orders, onStatus, toast }) {
       </div>
 
       <div style={{ padding: "18px 20px" }}>
+        {produitsDetail.length > 0 && (
+          <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "14px 16px", marginBottom: 16 }}>
+            <div style={{ fontSize: 11, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>📦 Mes produits à livrer</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {produitsDetail.map((p) => (
+                <div key={p.nom} style={{ background: "#FAFAF7", borderRadius: 8, padding: "8px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+                  <span style={{ fontSize: 12.5, fontWeight: 500 }}>{p.nom}</span>
+                  <div style={{ display: "flex", gap: 10, fontSize: 11.5 }}>
+                    <span style={{ color: "#8A9089" }}>{p.assignes} au total</span>
+                    <span style={{ color: "#1F9D6E" }}>{p.livres} livrés</span>
+                    <span style={{ color: p.restants > 0 ? "#D64933" : "#8A9089", fontWeight: 600 }}>{p.restants} restants</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {actives.length === 0 ? (
           <div style={{ textAlign: "center", padding: "50px 20px", color: "#8A9089" }}>
             <div style={{ fontSize: 40, marginBottom: 10 }}>🎉</div>
