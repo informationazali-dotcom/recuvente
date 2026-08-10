@@ -896,6 +896,18 @@ export default function App() {
     showToast("Date de livraison mise à jour");
   }
 
+  async function updateOrderInfos(orderId, infos) {
+    const { error } = await supabase.from("commandes").update(infos).eq("id", orderId);
+    if (error) {
+      showToast("Erreur: " + error.message);
+      return;
+    }
+    await loadOrders();
+    if (selected && selected.id === orderId) setSelected((s) => ({ ...s, ...infos }));
+    logEvent(orderId, `✏️ Informations modifiées`);
+    showToast("Commande mise à jour");
+  }
+
   async function logEvent(orderId, note) {
     await supabase.from("relances").insert([{ commande_id: orderId, note }]);
     loadRelances();
@@ -967,6 +979,21 @@ export default function App() {
   }, [closers, ordersInRange]);
 
   const commandesNonAssignees = useMemo(() => orders.filter((o) => !o.closer && (o.statut === "en_cours" || o.statut === "echouee")).length, [orders]);
+
+  const repartitionCloserLivreur = useMemo(() => {
+    const map = {};
+    ordersInRange.forEach((o) => {
+      if (!o.closer || !o.livreur) return;
+      const key = o.closer + "|||" + o.livreur;
+      if (!map[key]) map[key] = { closer: o.closer, livreur: o.livreur, total: 0, produits: {} };
+      map[key].total += 1;
+      const { nom, quantite } = parseProduitTexte(o.produit);
+      if (nom) map[key].produits[nom] = (map[key].produits[nom] || 0) + quantite;
+    });
+    return Object.values(map)
+      .map((r) => ({ ...r, produitsListe: Object.entries(r.produits).map(([nom, qte]) => ({ nom, qte })).sort((a, b) => b.qte - a.qte) }))
+      .sort((a, b) => b.total - a.total);
+  }, [ordersInRange]);
 
   const periodLabel = useMemo(() => {
     const labels = { aujourdhui: "Aujourd'hui", hier: "Hier", semaine: "Cette semaine", mois: "Ce mois", personnalise: "Période personnalisée" };
@@ -2009,6 +2036,7 @@ export default function App() {
           onAssignCloser={assignCloser}
           onReschedule={rescheduleOrder}
           onRelanceAdded={loadRelances}
+          onUpdateInfos={updateOrderInfos}
         />
       )}
       {showAdd && <AddOrder onClose={() => setShowAdd(false)} onAdd={addOrder} />}
@@ -2035,6 +2063,7 @@ export default function App() {
           periodLabel={periodLabel}
           orders={orders}
           livreurs={livreurs}
+          repartitionCloserLivreur={repartitionCloserLivreur}
           onClose={() => setShowComptaDetail(false)}
         />
       )}
@@ -2133,7 +2162,24 @@ function StatusDonut({ livrees, enAttente, echouees }) {
   );
 }
 
-function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, closers, onAssignCloser, onReschedule, onRelanceAdded }) {
+function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, closers, onAssignCloser, onReschedule, onRelanceAdded, onUpdateInfos }) {
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({ client: order.client, tel: order.tel, zone: order.zone, produit: order.produit, montant: order.montant });
+  const [saving, setSaving] = useState(false);
+
+  async function enregistrer() {
+    setSaving(true);
+    await onUpdateInfos(order.id, {
+      client: form.client,
+      tel: form.tel,
+      zone: form.zone,
+      produit: form.produit,
+      montant: Number(form.montant),
+    });
+    setSaving(false);
+    setEditing(false);
+  }
+
   return (
     <div className="rv-modal-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", zIndex: 50 }} onClick={onClose}>
       <div className="rv-modal-sheet" onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", maxHeight: "88vh", overflowY: "auto", borderRadius: "18px 18px 0 0", padding: "18px 20px 28px" }}>
@@ -2141,18 +2187,49 @@ function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, clos
           <button onClick={onClose} style={{ background: "none", border: "none", padding: 4 }}>
             <ChevronLeft size={22} />
           </button>
-          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 19 }}>{order.client}</div>
+          {!editing ? (
+            <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 19, flex: 1 }}>{order.client}</div>
+          ) : (
+            <div style={{ flex: 1, fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 19 }}>Modifier la commande</div>
+          )}
+          <button
+            onClick={() => (editing ? enregistrer() : setEditing(true))}
+            disabled={saving}
+            style={{ background: editing ? "#1a7a3c" : "none", color: editing ? "white" : "#1a7a3c", border: editing ? "none" : "1px solid #1a7a3c", borderRadius: 8, padding: "6px 12px", fontSize: 12.5, fontWeight: 600 }}
+          >
+            {saving ? "..." : editing ? "Enregistrer" : "✏️ Modifier"}
+          </button>
         </div>
 
-        <div style={{ display: "flex", gap: 8, fontSize: 13, color: "#6B7168", marginBottom: 14 }}>
-          <span>{order.tel}</span>·<span>{order.zone}</span>
-        </div>
+        {!editing ? (
+          <div style={{ display: "flex", gap: 8, fontSize: 13, color: "#6B7168", marginBottom: 14 }}>
+            <span>{order.tel}</span>·<span>{order.zone}</span>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+            {["client", "tel", "produit", "montant", "zone"].map((f) => (
+              <div key={f}>
+                <label style={{ fontSize: 11, color: "#8A9089", display: "block", marginBottom: 3, textTransform: "capitalize" }}>
+                  {f === "tel" ? "Téléphone" : f === "montant" ? "Montant (FCFA)" : f}
+                </label>
+                <input
+                  value={form[f]}
+                  onChange={(e) => setForm({ ...form, [f]: e.target.value })}
+                  type={f === "montant" ? "number" : "text"}
+                  style={{ width: "100%", padding: "9px 11px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 13.5, background: "white" }}
+                />
+              </div>
+            ))}
+          </div>
+        )}
 
+        {!editing && (
         <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: 14, marginBottom: 14 }}>
           <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.04em" }}>Commande</div>
           <div style={{ fontWeight: 600, marginTop: 2 }}>{order.produit}</div>
           <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 20, marginTop: 6, color: "#1a7a3c" }}>{formatFCFA(order.montant)}</div>
         </div>
+        )}
 
         {livreurs && livreurs.length > 0 && (
           <div style={{ marginBottom: 14 }}>
@@ -4234,15 +4311,20 @@ function ComptablePortal({ comptable, orders, livreurs }) {
     ordersInRange.forEach((o) => {
       const { nom, quantite } = parseProduitTexte(o.produit);
       if (!nom) return;
-      if (!map[nom]) map[nom] = { nom, pieces: 0, ca: 0, caConfirme: 0 };
+      if (!map[nom]) map[nom] = { nom, commandes: 0, pieces: 0, ca: 0, caConfirme: 0, livrees: 0 };
+      map[nom].commandes += 1;
       map[nom].pieces += quantite;
       map[nom].ca += Number(o.montant);
-      if (o.statut === "confirmee") map[nom].caConfirme += Number(o.montant);
+      if (o.statut === "confirmee") {
+        map[nom].caConfirme += Number(o.montant);
+        map[nom].livrees += 1;
+      }
     });
     return Object.values(map).sort((a, b) => b.ca - a.ca);
   }, [ordersInRange]);
 
   const totalPieces = produitsCA.reduce((s, p) => s + p.pieces, 0);
+  const totalCommandesProduits = produitsCA.reduce((s, p) => s + p.commandes, 0);
   const totalCAProduits = produitsCA.reduce((s, p) => s + p.ca, 0);
 
 
@@ -4357,12 +4439,12 @@ function ComptablePortal({ comptable, orders, livreurs }) {
                     <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 14, color: "#1a7a3c" }}>{formatFCFA(p.ca)}</span>
                   </div>
                   <div style={{ fontSize: 11.5, color: "#6B7168", marginTop: 3 }}>
-                    {p.pieces} pièce{p.pieces > 1 ? "s" : ""} · dont {formatFCFA(p.caConfirme)} confirmé
+                    {p.commandes} commande{p.commandes > 1 ? "s" : ""} ({p.pieces} pièce{p.pieces > 1 ? "s" : ""}) · {p.livrees} livrée{p.livrees > 1 ? "s" : ""} · dont {formatFCFA(p.caConfirme)} confirmé
                   </div>
                 </div>
               ))}
               <div style={{ background: "#16231F", borderRadius: 10, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
-                <span style={{ fontSize: 13, fontWeight: 700, color: "white" }}>Total — {totalPieces} pièce{totalPieces > 1 ? "s" : ""}</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "white" }}>Total — {totalCommandesProduits} commande{totalCommandesProduits > 1 ? "s" : ""} ({totalPieces} pièce{totalPieces > 1 ? "s" : ""})</span>
                 <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 15, color: "#e8920a" }}>{formatFCFA(totalCAProduits)}</span>
               </div>
             </div>
@@ -4394,10 +4476,11 @@ function ComptablePortal({ comptable, orders, livreurs }) {
   );
 }
 
-function ComptaDetailModal({ stats, livreursStats, coutLivraison, periodLabel, orders, livreurs, onClose }) {
+function ComptaDetailModal({ stats, livreursStats, coutLivraison, periodLabel, orders, livreurs, repartitionCloserLivreur, onClose }) {
   const actifs = livreursStats.filter((l) => l.livrees > 0);
   const totalDu = actifs.reduce((s, l) => s + (l.montantDu || 0), 0);
   const totalADeposer = actifs.reduce((s, l) => s + (l.montantRecupere - (l.montantDu || 0)), 0);
+  const [ligneOuverte, setLigneOuverte] = useState(null);
 
   return (
     <div className="rv-modal-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.6)", display: "flex", alignItems: "flex-end", zIndex: 55 }} onClick={onClose}>
@@ -4452,6 +4535,43 @@ function ComptaDetailModal({ stats, livreursStats, coutLivraison, periodLabel, o
             </div>
           ))}
         </div>
+
+        {repartitionCloserLivreur && repartitionCloserLivreur.length > 0 && (
+          <div style={{ marginTop: 20 }}>
+            <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>
+              🔄 Répartition Closer → Livreur ({periodLabel})
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {repartitionCloserLivreur.map((r, i) => {
+                const key = r.closer + "|||" + r.livreur;
+                const open = ligneOuverte === key;
+                return (
+                  <div key={i} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 10, padding: "10px 12px" }}>
+                    <button
+                      onClick={() => setLigneOuverte(open ? null : key)}
+                      style={{ width: "100%", background: "none", border: "none", display: "flex", justifyContent: "space-between", alignItems: "center", textAlign: "left" }}
+                    >
+                      <span style={{ fontSize: 12.5 }}>
+                        <strong>{r.closer}</strong> → <strong>{r.livreur}</strong>
+                      </span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "#1a7a3c" }}>{r.total} cmd {open ? "▲" : "▼"}</span>
+                    </button>
+                    {open && (
+                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #F0EEE6", display: "flex", flexDirection: "column", gap: 5 }}>
+                        {r.produitsListe.map((p) => (
+                          <div key={p.nom} style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5 }}>
+                            <span style={{ color: "#6B7168" }}>{p.nom}</span>
+                            <span style={{ fontWeight: 600 }}>{p.qte} pièce{p.qte > 1 ? "s" : ""}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
