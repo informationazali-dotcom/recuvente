@@ -4333,9 +4333,17 @@ function ComptablePortal({ comptable, orders, livreurs }) {
 
   return (
     <div style={{ background: "#FAFAF7", minHeight: "100vh", fontFamily: "'IBM Plex Sans', sans-serif", color: "#16231F", paddingBottom: 30 }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');`}</style>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');
+        @media print {
+          .rv-no-print { display: none !important; }
+          .rv-print-only { display: block !important; }
+          body, .rv-app { background: white !important; }
+          * { box-shadow: none !important; }
+        }
+      `}</style>
 
-      <div style={{ background: "#16231F", color: "white", padding: "22px 20px" }}>
+      <div className="rv-no-print" style={{ background: "#16231F", color: "white", padding: "22px 20px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 16 }}>
           <div style={{ width: 26, height: 26, borderRadius: 7, background: "rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>
             🧮
@@ -4344,8 +4352,14 @@ function ComptablePortal({ comptable, orders, livreurs }) {
             RECU<span style={{ color: "#e8920a" }}>VENTE</span> — Comptabilité
           </div>
           <button
+            onClick={() => window.print()}
+            style={{ marginLeft: "auto", background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: "6px 10px", borderRadius: 7, fontSize: 12, fontWeight: 500 }}
+          >
+            🖨️
+          </button>
+          <button
             onClick={() => supabase.auth.signOut()}
-            style={{ marginLeft: "auto", background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: "6px 12px", borderRadius: 7, fontSize: 12, fontWeight: 500 }}
+            style={{ background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: "6px 12px", borderRadius: 7, fontSize: 12, fontWeight: 500 }}
           >
             Déconnexion
           </button>
@@ -4353,7 +4367,12 @@ function ComptablePortal({ comptable, orders, livreurs }) {
         <div style={{ fontSize: 13, opacity: 0.7 }}>Bonjour {comptable.nom}</div>
       </div>
 
-      <div style={{ margin: "16px 20px 0", display: "flex", gap: 7, overflowX: "auto" }}>
+      <div className="rv-print-only" style={{ display: "none", padding: "20px 20px 0" }}>
+        <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 20 }}>Rapport comptable — RecuVente</div>
+        <div style={{ fontSize: 12, color: "#6B7168" }}>Édité le {new Date().toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })} — {periodLabelFromPreset(datePreset)}</div>
+      </div>
+
+      <div className="rv-no-print" style={{ margin: "16px 20px 0", display: "flex", gap: 7, overflowX: "auto" }}>
         {[
           { key: "aujourdhui", label: "Aujourd'hui" },
           { key: "hier", label: "Hier" },
@@ -4382,7 +4401,7 @@ function ComptablePortal({ comptable, orders, livreurs }) {
       </div>
 
       {datePreset === "personnalise" && (
-        <div style={{ margin: "8px 20px 0", display: "flex", gap: 8, alignItems: "center" }}>
+        <div className="rv-no-print" style={{ margin: "8px 20px 0", display: "flex", gap: 8, alignItems: "center" }}>
           <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 13 }} />
           <span style={{ color: "#8A9089", fontSize: 12 }}>à</span>
           <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 13 }} />
