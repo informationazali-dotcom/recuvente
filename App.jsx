@@ -960,6 +960,26 @@ export default function App() {
           if (p) produitCount[p] = (produitCount[p] || 0) + 1;
         });
         const produitPrefere = Object.entries(produitCount).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+
+        const confirmeesTriees = c.commandes
+          .filter((o) => o.statut === "confirmee")
+          .map((o) => new Date(o.created_at))
+          .sort((a, b) => a - b);
+
+        let intervalleMoyen = null;
+        let joursDepuisDernier = null;
+        let joursDeRetard = null;
+        if (confirmeesTriees.length >= 2) {
+          const intervalles = [];
+          for (let i = 1; i < confirmeesTriees.length; i++) {
+            intervalles.push((confirmeesTriees[i] - confirmeesTriees[i - 1]) / 86400000);
+          }
+          intervalleMoyen = Math.round(intervalles.reduce((s, v) => s + v, 0) / intervalles.length);
+          const dernier = confirmeesTriees[confirmeesTriees.length - 1];
+          joursDepuisDernier = Math.round((new Date() - dernier) / 86400000);
+          joursDeRetard = joursDepuisDernier - intervalleMoyen;
+        }
+
         return {
           ...c,
           total: c.commandes.length,
@@ -967,10 +987,19 @@ export default function App() {
           echouees: c.commandes.filter((o) => o.statut === "echouee").length,
           montantTotal: c.commandes.reduce((s, o) => s + (o.recupere ? Number(o.montant) : 0), 0),
           produitPrefere,
+          intervalleMoyen,
+          joursDepuisDernier,
+          joursDeRetard,
         };
       })
       .sort((a, b) => b.montantTotal - a.montantTotal);
   }, [orders]);
+
+  const clientsARelancer = useMemo(() => {
+    return clients
+      .filter((c) => c.joursDeRetard !== null && c.joursDeRetard >= 0)
+      .sort((a, b) => b.joursDeRetard - a.joursDeRetard);
+  }, [clients]);
 
   const produits = useMemo(() => {
     const map = {};
@@ -1748,7 +1777,7 @@ export default function App() {
 
       {view === "today" && (
         <div className="rv-fadein">
-          <TodayView todo={todoAujourdhui} onSelectOrder={(o) => { setView("dashboard"); setSelected(o); }} onRelancerTout={() => setShowBatch(true)} />
+          <TodayView todo={todoAujourdhui} onSelectOrder={(o) => { setView("dashboard"); setSelected(o); }} onRelancerTout={() => setShowBatch(true)} clientsARelancer={clientsARelancer} />
         </div>
       )}
 
@@ -2185,8 +2214,9 @@ function ClientsView({ clients, onSelect }) {
             style={{ textAlign: "left", background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}
           >
             <div>
-              <div style={{ fontWeight: 600, fontSize: 15, display: "flex", alignItems: "center", gap: 6 }}>
+              <div style={{ fontWeight: 600, fontSize: 15, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                 {i < 3 && c.montantTotal > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: "#e8920a", background: "#FBF3E3", padding: "1px 7px", borderRadius: 999 }}>🏆 TOP CLIENT</span>}
+                {c.joursDeRetard !== null && c.joursDeRetard >= 0 && <span style={{ fontSize: 10, fontWeight: 700, color: "#1a7a3c", background: "#EAF3DE", padding: "1px 7px", borderRadius: 999 }}>🔄 À relancer</span>}
                 {c.nom}
               </div>
               <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{c.tel} · {c.zone}</div>
@@ -2785,7 +2815,7 @@ function RelancesHistorique({ orderId, onAdded }) {
   );
 }
 
-function TodayView({ todo, onSelectOrder, onRelancerTout }) {
+function TodayView({ todo, onSelectOrder, onRelancerTout, clientsARelancer = [] }) {
   const sections = [
     { key: "aRelivrer", title: "📅 À relivrer aujourd'hui", items: todo.aRelivrer, color: "#1a7a3c", bg: "#EAF3DE" },
     { key: "jamaisContactees", title: "🆕 Jamais contactées", items: todo.jamaisContactees, color: "#8A6412", bg: "#FBF3E3" },
@@ -2867,6 +2897,41 @@ function TodayView({ todo, onSelectOrder, onRelancerTout }) {
           </div>
         ) : null;
       })}
+
+      {clientsARelancer.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#1a7a3c", marginBottom: 3 }}>
+            🔄 Clients à relancer pour réachat ({clientsARelancer.length})
+          </div>
+          <div style={{ fontSize: 11.5, color: "#8A9089", marginBottom: 8 }}>
+            Basé sur leur rythme d'achat habituel — leur prochaine commande est probablement en retard.
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {clientsARelancer.slice(0, 10).map((c) => (
+              <a
+                key={c.tel}
+                href={`https://wa.me/${cleanPhoneForWhatsApp(c.tel)}?text=${encodeURIComponent(`Bonjour ${c.nom.split(" ")[0]} 👋, ça faisait un moment ! On voulait savoir si vous seriez intéressé(e) pour recommander ${c.produitPrefere || "un de nos produits"} chez Azali Express ?`)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ textAlign: "left", background: "white", border: "1px solid #ECE8DC", borderLeft: "4px solid #1a7a3c", borderRadius: 10, padding: "12px 14px", display: "flex", alignItems: "center", gap: 10, textDecoration: "none", color: "inherit" }}
+              >
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, fontSize: 14.5 }}>{c.nom}</div>
+                  <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>
+                    Achète en général tous les {c.intervalleMoyen}j · dernier achat il y a {c.joursDepuisDernier}j
+                  </div>
+                  {c.produitPrefere && (
+                    <div style={{ fontSize: 11.5, color: "#8A9089", marginTop: 2 }}>Préfère : {c.produitPrefere}</div>
+                  )}
+                </div>
+                <div style={{ background: "#1F9D6E", borderRadius: 8, padding: 8, display: "flex", flexShrink: 0 }}>
+                  <MessageCircle size={16} color="white" />
+                </div>
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
