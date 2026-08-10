@@ -4229,6 +4229,23 @@ function ComptablePortal({ comptable, orders, livreurs }) {
       .sort((a, b) => b.montantADeposer - a.montantADeposer);
   }, [livreurs, ordersInRange]);
 
+  const produitsCA = useMemo(() => {
+    const map = {};
+    ordersInRange.forEach((o) => {
+      const { nom, quantite } = parseProduitTexte(o.produit);
+      if (!nom) return;
+      if (!map[nom]) map[nom] = { nom, pieces: 0, ca: 0, caConfirme: 0 };
+      map[nom].pieces += quantite;
+      map[nom].ca += Number(o.montant);
+      if (o.statut === "confirmee") map[nom].caConfirme += Number(o.montant);
+    });
+    return Object.values(map).sort((a, b) => b.ca - a.ca);
+  }, [ordersInRange]);
+
+  const totalPieces = produitsCA.reduce((s, p) => s + p.pieces, 0);
+  const totalCAProduits = produitsCA.reduce((s, p) => s + p.ca, 0);
+
+
   const totalDu = livreursStats.reduce((s, l) => s + l.montantDu, 0);
   const totalADeposer = livreursStats.reduce((s, l) => s + l.montantADeposer, 0);
 
@@ -4326,6 +4343,31 @@ function ComptablePortal({ comptable, orders, livreurs }) {
 
       <div style={{ padding: "20px 20px 0" }}>
         <ResumeMultiPeriodes orders={orders} livreurs={livreurs} />
+
+        {produitsCA.length > 0 && (
+          <div style={{ marginBottom: 24 }}>
+            <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>
+              💵 Chiffre d'affaires par produit ({periodLabelFromPreset(datePreset)})
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {produitsCA.map((p) => (
+                <div key={p.nom} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 10, padding: "10px 14px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>{p.nom}</span>
+                    <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 14, color: "#1a7a3c" }}>{formatFCFA(p.ca)}</span>
+                  </div>
+                  <div style={{ fontSize: 11.5, color: "#6B7168", marginTop: 3 }}>
+                    {p.pieces} pièce{p.pieces > 1 ? "s" : ""} · dont {formatFCFA(p.caConfirme)} confirmé
+                  </div>
+                </div>
+              ))}
+              <div style={{ background: "#16231F", borderRadius: 10, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "white" }}>Total — {totalPieces} pièce{totalPieces > 1 ? "s" : ""}</span>
+                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 15, color: "#e8920a" }}>{formatFCFA(totalCAProduits)}</span>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>Détail par livreur ({periodLabelFromPreset(datePreset)})</div>
         {livreursStats.length === 0 && (
