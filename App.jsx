@@ -24,6 +24,78 @@ function parseProduitTexte(texte) {
   return { nom: texte.trim(), quantite: 1 };
 }
 
+function getRangeForPreset(preset) {
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (preset === "aujourdhui") {
+    return { start: startOfToday, end: new Date(startOfToday.getTime() + 86400000) };
+  }
+  if (preset === "hier") {
+    return { start: new Date(startOfToday.getTime() - 86400000), end: startOfToday };
+  }
+  if (preset === "semaine") {
+    const day = startOfToday.getDay();
+    const diff = day === 0 ? 6 : day - 1;
+    return { start: new Date(startOfToday.getTime() - diff * 86400000), end: new Date(now.getTime() + 60000) };
+  }
+  if (preset === "mois") {
+    return { start: new Date(now.getFullYear(), now.getMonth(), 1), end: new Date(now.getTime() + 60000) };
+  }
+  return { start: new Date(0), end: new Date(now.getTime() + 60000) };
+}
+
+const COUT_LIVRAISON_CONST = 1500;
+
+function calculerDepotPeriode(orders, livreurs, preset) {
+  const { start, end } = getRangeForPreset(preset);
+  const ordersP = orders.filter((o) => {
+    const d = new Date(o.created_at);
+    return d >= start && d < end;
+  });
+  const confirmees = ordersP.filter((o) => o.statut === "confirmee");
+  const montantConfirme = confirmees.reduce((s, o) => s + Number(o.montant), 0);
+  const commission = confirmees.length * COUT_LIVRAISON_CONST;
+  const aDeposer = montantConfirme - commission;
+  return { livraisons: confirmees.length, montantConfirme, commission, aDeposer };
+}
+
+function periodLabelFromPreset(preset) {
+  const labels = { aujourdhui: "Aujourd'hui", hier: "Hier", semaine: "Cette semaine", mois: "Ce mois", personnalise: "Période personnalisée" };
+  return labels[preset] || "";
+}
+
+function ResumeMultiPeriodes({ orders, livreurs, dark }) {
+  const presets = [
+    { key: "aujourdhui", label: "Aujourd'hui" },
+    { key: "hier", label: "Hier" },
+    { key: "semaine", label: "Cette semaine" },
+    { key: "mois", label: "Ce mois" },
+  ];
+  const lignes = presets.map((p) => ({ ...p, ...calculerDepotPeriode(orders, livreurs, p.key) }));
+
+  return (
+    <div style={{ background: dark ? "white" : "white", border: "1px solid #ECE8DC", borderRadius: 14, padding: "16px 18px", marginBottom: 16 }}>
+      <div style={{ fontSize: 11, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 12 }}>
+        🏦 Récapitulatif des dépôts — vue d'ensemble
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {lignes.map((l) => (
+          <div key={l.key} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: 10, borderBottom: "1px solid #F0EEE6" }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{l.label}</div>
+              <div style={{ fontSize: 11, color: "#8A9089", marginTop: 1 }}>{l.livraisons} livraison{l.livraisons > 1 ? "s" : ""}</div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 15, color: "#3B6D11" }}>{formatFCFA(l.aDeposer)}</div>
+              <div style={{ fontSize: 10.5, color: "#8A9089" }}>à déposer</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function exportCSV(orders) {
   const headers = ["Client", "Téléphone", "Produit", "Montant", "Zone", "Statut", "Livreur", "Date"];
   const rows = orders.map((o) => [
@@ -1811,6 +1883,8 @@ export default function App() {
           livreursStats={livreursStats}
           coutLivraison={COUT_LIVRAISON}
           periodLabel={periodLabel}
+          orders={orders}
+          livreurs={livreurs}
           onClose={() => setShowComptaDetail(false)}
         />
       )}
@@ -3997,7 +4071,9 @@ function ComptablePortal({ comptable, orders, livreurs }) {
       </div>
 
       <div style={{ padding: "20px 20px 0" }}>
-        <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>Détail par livreur</div>
+        <ResumeMultiPeriodes orders={orders} livreurs={livreurs} />
+
+        <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>Détail par livreur ({periodLabelFromPreset(datePreset)})</div>
         {livreursStats.length === 0 && (
           <div style={{ textAlign: "center", padding: "30px 0", color: "#8A9089", fontSize: 14 }}>Aucune livraison sur cette période.</div>
         )}
@@ -4022,7 +4098,7 @@ function ComptablePortal({ comptable, orders, livreurs }) {
   );
 }
 
-function ComptaDetailModal({ stats, livreursStats, coutLivraison, periodLabel, onClose }) {
+function ComptaDetailModal({ stats, livreursStats, coutLivraison, periodLabel, orders, livreurs, onClose }) {
   const actifs = livreursStats.filter((l) => l.livrees > 0);
   const totalDu = actifs.reduce((s, l) => s + (l.montantDu || 0), 0);
   const totalADeposer = actifs.reduce((s, l) => s + (l.montantRecupere - (l.montantDu || 0)), 0);
@@ -4058,7 +4134,9 @@ function ComptaDetailModal({ stats, livreursStats, coutLivraison, periodLabel, o
           </div>
         </div>
 
-        <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>Détail par livreur</div>
+        <ResumeMultiPeriodes orders={orders} livreurs={livreurs} />
+
+        <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>Détail par livreur ({periodLabel})</div>
         {actifs.length === 0 && (
           <div style={{ textAlign: "center", padding: "20px 0", color: "#8A9089", fontSize: 13.5 }}>Aucune livraison sur cette période.</div>
         )}
