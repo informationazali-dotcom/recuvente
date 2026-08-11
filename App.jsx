@@ -861,6 +861,15 @@ export default function App() {
     await loadProduits();
   }
 
+  async function updateProduitStock(id, stock_initial) {
+    const { error } = await supabase.from("produits").update({ stock_initial: Number(stock_initial) }).eq("id", id);
+    if (error) {
+      showToast("Erreur: " + error.message);
+      return;
+    }
+    await loadProduits();
+  }
+
   async function deleteProduit(id) {
     const { error } = await supabase.from("produits").delete().eq("id", id);
     if (error) {
@@ -1086,6 +1095,18 @@ export default function App() {
   const meilleurProduit = produits[0] || null;
   const produitPlusRentable = produits.length ? [...produits].sort((a, b) => b.revenus - a.revenus)[0] : null;
   const meilleurLivreur = livreursStats.length ? [...livreursStats].sort((a, b) => (b.taux ?? -1) - (a.taux ?? -1))[0] : null;
+
+  const quantitesParProduit = useMemo(() => {
+    const map = {};
+    orders.forEach((o) => {
+      const { nom, quantite } = parseProduitTexte(o.produit);
+      if (!nom) return;
+      if (!map[nom]) map[nom] = { commandees: 0, livrees: 0 };
+      if (o.statut !== "echouee") map[nom].commandees += quantite; // en_cours + confirmée = potentiellement engagé sur le stock
+      if (o.statut === "confirmee") map[nom].livrees += quantite;
+    });
+    return map;
+  }, [orders]);
 
   const anomaliesProduitZone = useMemo(() => {
     const traites = orders.filter((o) => o.statut === "confirmee" || o.statut === "echouee");
@@ -2072,6 +2093,8 @@ export default function App() {
           produits={catalogueProduits}
           onDelete={deleteProduit}
           onUpdateCout={updateProduitCout}
+          onUpdateStock={updateProduitStock}
+          quantitesParProduit={quantitesParProduit}
           onAddClick={() => setShowAddProduit(true)}
           onClose={() => setShowProduits(false)}
         />
@@ -4596,9 +4619,11 @@ function ComptaDetailModal({ stats, livreursStats, coutLivraison, periodLabel, o
   );
 }
 
-function ProduitsModal({ produits, onDelete, onUpdateCout, onAddClick, onClose }) {
+function ProduitsModal({ produits, onDelete, onUpdateCout, onUpdateStock, quantitesParProduit, onAddClick, onClose }) {
   const [editId, setEditId] = useState(null);
   const [editValue, setEditValue] = useState("");
+  const [editStockId, setEditStockId] = useState(null);
+  const [editStockValue, setEditStockValue] = useState("");
 
   function commencerEdition(p) {
     setEditId(p.id);
@@ -4610,17 +4635,52 @@ function ProduitsModal({ produits, onDelete, onUpdateCout, onAddClick, onClose }
     setEditId(null);
   }
 
+  function commencerEditionStock(p) {
+    setEditStockId(p.id);
+    setEditStockValue(String(p.stock_initial || 0));
+  }
+
+  function validerEditionStock(id) {
+    onUpdateStock(id, editStockValue);
+    setEditStockId(null);
+  }
+
+  const totalStock = produits.reduce((s, p) => s + Number(p.stock_initial || 0), 0);
+  const totalVendu = produits.reduce((s, p) => s + (quantitesParProduit[p.nom]?.commandees || 0), 0);
+  const totalLivre = produits.reduce((s, p) => s + (quantitesParProduit[p.nom]?.livrees || 0), 0);
+
   return (
     <div className="rv-modal-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", zIndex: 50 }} onClick={onClose}>
-      <div className="rv-modal-sheet" onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", maxHeight: "80vh", overflowY: "auto", borderRadius: "18px 18px 0 0", padding: "18px 20px 28px" }}>
+      <div className="rv-modal-sheet" onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", maxHeight: "85vh", overflowY: "auto", borderRadius: "18px 18px 0 0", padding: "18px 20px 28px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 19 }}>Catalogue produits</div>
+          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 19 }}>Catalogue & Stock</div>
           <button onClick={onClose} style={{ background: "none", border: "none" }}><X size={20} /></button>
         </div>
 
         <div style={{ fontSize: 12.5, color: "#6B7168", marginBottom: 14 }}>
-          Le nom doit correspondre exactement à celui utilisé dans tes commandes (ex: "Peineili Spray"). Renseigne le coût d'achat unitaire (Alibaba) pour que le Bénéfice réel soit précis.
+          Le nom doit correspondre exactement à celui utilisé dans tes commandes. Renseigne le stock acheté (Alibaba) pour suivre ce qu'il reste.
         </div>
+
+        {produits.length > 0 && (
+          <div style={{ background: "#16231F", borderRadius: 12, padding: "12px 14px", marginBottom: 16, display: "flex", justifyContent: "space-around", textAlign: "center" }}>
+            <div>
+              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", textTransform: "uppercase" }}>En stock</div>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 18, color: "white" }}>{totalStock}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", textTransform: "uppercase" }}>Engagé</div>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 18, color: "#e8920a" }}>{totalVendu}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", textTransform: "uppercase" }}>Livré</div>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 18, color: "#7fd6a3" }}>{totalLivre}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", textTransform: "uppercase" }}>Restant</div>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 18, color: "white" }}>{totalStock - totalVendu}</div>
+            </div>
+          </div>
+        )}
 
         <button
           onClick={onAddClick}
@@ -4633,33 +4693,70 @@ function ProduitsModal({ produits, onDelete, onUpdateCout, onAddClick, onClose }
           <div style={{ textAlign: "center", padding: "30px 0", color: "#8A9089", fontSize: 14 }}>Aucun produit dans le catalogue.</div>
         )}
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {produits.map((p) => (
-            <div key={p.id} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 600, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.nom}</div>
-                {editId === p.id ? (
-                  <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                    <input
-                      type="number"
-                      value={editValue}
-                      onChange={(e) => setEditValue(e.target.value)}
-                      autoFocus
-                      style={{ flex: 1, padding: "6px 8px", borderRadius: 6, border: "1px solid #DDD8CC", fontSize: 13 }}
-                    />
-                    <button onClick={() => validerEdition(p.id)} style={{ background: "#1a7a3c", color: "white", border: "none", borderRadius: 6, padding: "0 10px", fontSize: 12, fontWeight: 600 }}>OK</button>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {produits.map((p) => {
+            const q = quantitesParProduit[p.nom] || { commandees: 0, livrees: 0 };
+            const stock = Number(p.stock_initial || 0);
+            const restant = stock - q.commandees;
+            return (
+              <div key={p.id} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "12px 14px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.nom}</div>
+                    {editId === p.id ? (
+                      <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                        <input type="number" value={editValue} onChange={(e) => setEditValue(e.target.value)} autoFocus style={{ flex: 1, padding: "6px 8px", borderRadius: 6, border: "1px solid #DDD8CC", fontSize: 13 }} />
+                        <button onClick={() => validerEdition(p.id)} style={{ background: "#1a7a3c", color: "white", border: "none", borderRadius: 6, padding: "0 10px", fontSize: 12, fontWeight: 600 }}>OK</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => commencerEdition(p)} style={{ background: "none", border: "none", padding: 0, marginTop: 3, fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, color: "#6B7168", textDecoration: "underline" }}>
+                        Coût : {formatFCFA(p.cout_achat)}
+                      </button>
+                    )}
                   </div>
-                ) : (
-                  <button onClick={() => commencerEdition(p)} style={{ background: "none", border: "none", padding: 0, marginTop: 3, fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, color: "#6B7168", textDecoration: "underline" }}>
-                    Coût : {formatFCFA(p.cout_achat)}
+                  <button onClick={() => onDelete(p.id)} style={{ background: "none", border: "none", color: "#D64933", padding: 6, flexShrink: 0 }} aria-label="Retirer">
+                    <Trash2 size={17} />
                   </button>
-                )}
+                </div>
+
+                <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #F0EEE6" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                    <span style={{ fontSize: 11, color: "#8A9089", textTransform: "uppercase" }}>Stock acheté</span>
+                    {editStockId === p.id ? (
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <input type="number" value={editStockValue} onChange={(e) => setEditStockValue(e.target.value)} autoFocus style={{ width: 70, padding: "4px 7px", borderRadius: 6, border: "1px solid #DDD8CC", fontSize: 12.5 }} />
+                        <button onClick={() => validerEditionStock(p.id)} style={{ background: "#1a7a3c", color: "white", border: "none", borderRadius: 6, padding: "0 9px", fontSize: 11.5, fontWeight: 600 }}>OK</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => commencerEditionStock(p)} style={{ background: "none", border: "none", padding: 0, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 13.5, color: "#16231F", textDecoration: "underline" }}>
+                        {stock} pièces
+                      </button>
+                    )}
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <div style={{ flex: 1, background: "#FBF3E3", borderRadius: 7, padding: "6px 8px", textAlign: "center" }}>
+                      <div style={{ fontSize: 9.5, color: "#8A6412" }}>Engagé</div>
+                      <div style={{ fontWeight: 700, fontSize: 13, color: "#8A6412" }}>{q.commandees}</div>
+                    </div>
+                    <div style={{ flex: 1, background: "#EAF7F1", borderRadius: 7, padding: "6px 8px", textAlign: "center" }}>
+                      <div style={{ fontSize: 9.5, color: "#1F9D6E" }}>Livré</div>
+                      <div style={{ fontWeight: 700, fontSize: 13, color: "#1F9D6E" }}>{q.livrees}</div>
+                    </div>
+                    <div style={{ flex: 1, background: restant <= 5 && stock > 0 ? "#FBEAE6" : "#EAF3DE", borderRadius: 7, padding: "6px 8px", textAlign: "center" }}>
+                      <div style={{ fontSize: 9.5, color: restant <= 5 && stock > 0 ? "#D64933" : "#3B6D11" }}>Restant</div>
+                      <div style={{ fontWeight: 700, fontSize: 13, color: restant <= 5 && stock > 0 ? "#D64933" : "#3B6D11" }}>{stock > 0 ? restant : "—"}</div>
+                    </div>
+                  </div>
+                  {stock > 0 && restant <= 5 && restant > 0 && (
+                    <div style={{ fontSize: 10.5, color: "#D64933", marginTop: 5, fontWeight: 600 }}>⚠️ Stock bientôt épuisé</div>
+                  )}
+                  {stock > 0 && restant <= 0 && (
+                    <div style={{ fontSize: 10.5, color: "#D64933", marginTop: 5, fontWeight: 600 }}>🔴 Stock épuisé — commandes en cours risquent de ne pas être honorées</div>
+                  )}
+                </div>
               </div>
-              <button onClick={() => onDelete(p.id)} style={{ background: "none", border: "none", color: "#D64933", padding: 6, flexShrink: 0 }} aria-label="Retirer">
-                <Trash2 size={17} />
-              </button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
