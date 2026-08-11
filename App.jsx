@@ -509,6 +509,9 @@ export default function App() {
     } else if (datePreset === "hier") {
       start = new Date(startOfToday.getTime() - 86400000);
       end = startOfToday;
+    } else if (datePreset === "avanthier") {
+      start = new Date(startOfToday.getTime() - 2 * 86400000);
+      end = new Date(startOfToday.getTime() - 86400000);
     } else if (datePreset === "semaine") {
       const day = startOfToday.getDay();
       const diff = day === 0 ? 6 : day - 1;
@@ -634,41 +637,6 @@ export default function App() {
     });
     return { count: map, last: lastByOrder };
   }, [allRelances]);
-
-  const validationsParJour = useMemo(() => {
-    const confirmeesAvecDate = orders.filter((o) => o.statut === "confirmee" && o.confirmed_at);
-    const map = {};
-    confirmeesAvecDate.forEach((o) => {
-      const dValidation = new Date(o.confirmed_at);
-      const keyValidation = dValidation.toISOString().slice(0, 10);
-      const dCreation = new Date(o.created_at);
-      const keyCreation = dCreation.toISOString().slice(0, 10);
-      const memeJour = keyValidation === keyCreation;
-      if (!map[keyValidation]) {
-        map[keyValidation] = {
-          date: keyValidation,
-          label: dValidation.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }),
-          orders: [],
-        };
-      }
-      map[keyValidation].orders.push({ ...o, memeJour, labelCreation: dCreation.toLocaleDateString("fr-FR", { day: "numeric", month: "short" }) });
-    });
-    return Object.values(map).sort((a, b) => (a.date < b.date ? 1 : -1));
-  }, [orders]);
-
-  const nonValideesParJour = useMemo(() => {
-    const nonValidees = orders.filter((o) => o.statut === "en_cours" || o.statut === "echouee");
-    const map = {};
-    nonValidees.forEach((o) => {
-      const d = new Date(o.created_at);
-      const key = d.toISOString().slice(0, 10);
-      if (!map[key]) {
-        map[key] = { date: key, label: d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }), orders: [] };
-      }
-      map[key].orders.push(o);
-    });
-    return Object.values(map).sort((a, b) => (a.date < b.date ? 1 : -1));
-  }, [orders]);
 
   const todoAujourdhui = useMemo(() => {
     const today = new Date();
@@ -1659,6 +1627,7 @@ export default function App() {
         {[
           { key: "aujourdhui", label: "Aujourd'hui" },
           { key: "hier", label: "Hier" },
+          { key: "avanthier", label: "Avant-hier" },
           { key: "semaine", label: "Cette semaine" },
           { key: "mois", label: "Ce mois" },
           { key: "personnalise", label: "Personnalisé" },
@@ -2022,8 +1991,7 @@ export default function App() {
       {view === "validations" && (
         <div className="rv-fadein">
           <ValidationsView
-            validationsParJour={validationsParJour}
-            nonValideesParJour={nonValideesParJour}
+            orders={orders}
             onSelectOrder={(o) => { setView("dashboard"); setSelected(o); }}
           />
         </div>
@@ -3300,28 +3268,132 @@ function TodayView({ todo, onSelectOrder, onRelancerTout, clientsARelancer = [],
   );
 }
 
-function ValidationsView({ validationsParJour, nonValideesParJour, onSelectOrder }) {
+function ValidationsView({ orders, onSelectOrder }) {
   const [tab, setTab] = useState("validees");
+  const [datePreset, setDatePreset] = useState("semaine");
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
+
+  const dateRange = useMemo(() => {
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    let start, end;
+    if (datePreset === "aujourdhui") {
+      start = startOfToday;
+      end = new Date(startOfToday.getTime() + 86400000);
+    } else if (datePreset === "hier") {
+      start = new Date(startOfToday.getTime() - 86400000);
+      end = startOfToday;
+    } else if (datePreset === "avanthier") {
+      start = new Date(startOfToday.getTime() - 2 * 86400000);
+      end = new Date(startOfToday.getTime() - 86400000);
+    } else if (datePreset === "semaine") {
+      const day = startOfToday.getDay();
+      const diff = day === 0 ? 6 : day - 1;
+      start = new Date(startOfToday.getTime() - diff * 86400000);
+      end = new Date(now.getTime() + 60000);
+    } else if (datePreset === "mois") {
+      start = new Date(now.getFullYear(), now.getMonth(), 1);
+      end = new Date(now.getTime() + 60000);
+    } else if (datePreset === "personnalise" && customStart && customEnd) {
+      start = new Date(customStart + "T00:00:00");
+      end = new Date(customEnd + "T23:59:59");
+    } else {
+      start = new Date(0);
+      end = new Date(now.getTime() + 60000);
+    }
+    return { start, end };
+  }, [datePreset, customStart, customEnd]);
+
+  const validationsParJour = useMemo(() => {
+    const confirmeesAvecDate = orders.filter((o) => {
+      if (o.statut !== "confirmee" || !o.confirmed_at) return false;
+      const d = new Date(o.confirmed_at);
+      return d >= dateRange.start && d < dateRange.end;
+    });
+    const map = {};
+    confirmeesAvecDate.forEach((o) => {
+      const dValidation = new Date(o.confirmed_at);
+      const keyValidation = dValidation.toISOString().slice(0, 10);
+      const dCreation = new Date(o.created_at);
+      const keyCreation = dCreation.toISOString().slice(0, 10);
+      const memeJour = keyValidation === keyCreation;
+      if (!map[keyValidation]) {
+        map[keyValidation] = {
+          date: keyValidation,
+          label: dValidation.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }),
+          orders: [],
+        };
+      }
+      map[keyValidation].orders.push({ ...o, memeJour, labelCreation: dCreation.toLocaleDateString("fr-FR", { day: "numeric", month: "short" }) });
+    });
+    return Object.values(map).sort((a, b) => (a.date < b.date ? 1 : -1));
+  }, [orders, dateRange]);
+
+  const nonValideesParJour = useMemo(() => {
+    const nonValidees = orders.filter((o) => {
+      if (o.statut !== "en_cours" && o.statut !== "echouee") return false;
+      const d = new Date(o.created_at);
+      return d >= dateRange.start && d < dateRange.end;
+    });
+    const map = {};
+    nonValidees.forEach((o) => {
+      const d = new Date(o.created_at);
+      const key = d.toISOString().slice(0, 10);
+      if (!map[key]) {
+        map[key] = { date: key, label: d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }), orders: [] };
+      }
+      map[key].orders.push(o);
+    });
+    return Object.values(map).sort((a, b) => (a.date < b.date ? 1 : -1));
+  }, [orders, dateRange]);
 
   return (
     <div style={{ padding: "20px 20px 8px" }}>
       <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 22, marginBottom: 4 }}>Validations</div>
-      <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 16 }}>
+      <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 14 }}>
         Ce qui a été confirmé, jour par jour — et ce qui attend encore.
       </div>
+
+      <div style={{ display: "flex", gap: 6, marginBottom: 14, overflowX: "auto" }}>
+        {[
+          { key: "aujourdhui", label: "Aujourd'hui" },
+          { key: "hier", label: "Hier" },
+          { key: "avanthier", label: "Avant-hier" },
+          { key: "semaine", label: "Cette semaine" },
+          { key: "mois", label: "Ce mois" },
+          { key: "personnalise", label: "Personnalisé" },
+        ].map((d) => (
+          <button
+            key={d.key}
+            onClick={() => setDatePreset(d.key)}
+            style={{ padding: "6px 13px", borderRadius: 999, border: `1px solid ${datePreset === d.key ? "#1a7a3c" : "#DDD8CC"}`, background: datePreset === d.key ? "#1a7a3c" : "white", color: datePreset === d.key ? "white" : "#16231F", fontSize: 12.5, fontWeight: 500, whiteSpace: "nowrap", flexShrink: 0 }}
+          >
+            {d.label}
+          </button>
+        ))}
+      </div>
+
+      {datePreset === "personnalise" && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 14 }}>
+          <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 13 }} />
+          <span style={{ color: "#8A9089", fontSize: 12 }}>à</span>
+          <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 13 }} />
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
         <button
           onClick={() => setTab("validees")}
           style={{ flex: 1, padding: "9px 0", borderRadius: 9, border: `1px solid ${tab === "validees" ? "#1a7a3c" : "#DDD8CC"}`, background: tab === "validees" ? "#1a7a3c" : "white", color: tab === "validees" ? "white" : "#16231F", fontWeight: 600, fontSize: 13 }}
         >
-          ✅ Validées
+          ✅ Validées ({validationsParJour.reduce((s, g) => s + g.orders.length, 0)})
         </button>
         <button
           onClick={() => setTab("nonvalidees")}
           style={{ flex: 1, padding: "9px 0", borderRadius: 9, border: `1px solid ${tab === "nonvalidees" ? "#D64933" : "#DDD8CC"}`, background: tab === "nonvalidees" ? "#D64933" : "white", color: tab === "nonvalidees" ? "white" : "#16231F", fontWeight: 600, fontSize: 13 }}
         >
-          ⏳ Non validées
+          ⏳ Non validées ({nonValideesParJour.reduce((s, g) => s + g.orders.length, 0)})
         </button>
       </div>
 
@@ -3814,7 +3886,8 @@ function ClosersView({ closers, onDelete, nonAssignees, periodLabel }) {
             </div>
             <div style={{ display: "flex", gap: 14, marginTop: 10, fontSize: 12.5, flexWrap: "wrap" }}>
               <span style={{ color: "#6B7168" }}>{c.total} commande{c.total > 1 ? "s" : ""}</span>
-              {c.taux !== null && <span style={{ color: "#1a7a3c", fontWeight: 600 }}>{c.taux}% confirmé</span>}
+              <span style={{ color: "#1a7a3c", fontWeight: 700 }}>✅ {c.confirmees} confirmée{c.confirmees > 1 ? "s" : ""}</span>
+              {c.taux !== null && <span style={{ color: "#8A9089" }}>({c.taux}%)</span>}
               {c.enCours > 0 && <span style={{ color: "#8A6412" }}>{c.enCours} en cours</span>}
             </div>
             {c.montantRecupere > 0 && (
@@ -4666,6 +4739,7 @@ function ComptablePortal({ comptable, orders, livreurs }) {
         {[
           { key: "aujourdhui", label: "Aujourd'hui" },
           { key: "hier", label: "Hier" },
+          { key: "avanthier", label: "Avant-hier" },
           { key: "semaine", label: "Cette semaine" },
           { key: "mois", label: "Ce mois" },
           { key: "personnalise", label: "Personnalisé" },
