@@ -891,6 +891,29 @@ export default function App() {
     logEvent(orderId, closerNom ? `🎧 Closer assigné : ${closerNom}` : "🎧 Closer retiré");
   }
 
+  async function seAttribuerCommande(orderId, closerNom) {
+    // Mise à jour conditionnelle : ne fonctionne QUE si personne ne l'a déjà prise entre-temps
+    const { data, error } = await supabase
+      .from("commandes")
+      .update({ closer: closerNom })
+      .eq("id", orderId)
+      .is("closer", null)
+      .select();
+
+    if (error) {
+      showToast("Erreur: " + error.message);
+      return;
+    }
+    if (!data || data.length === 0) {
+      showToast("⚠️ Trop tard, un autre closer vient de la prendre");
+      await loadOrders();
+      return;
+    }
+    logEvent(orderId, `🎧 Prise en charge par ${closerNom}`);
+    await loadOrders();
+    showToast("✅ Commande attribuée, à toi de jouer !");
+  }
+
   async function rescheduleOrder(orderId, date) {
     const { error } = await supabase.from("commandes").update({ date_relivraison: date || null }).eq("id", orderId);
     if (error) {
@@ -1946,7 +1969,15 @@ export default function App() {
 
       {view === "today" && (
         <div className="rv-fadein">
-          <TodayView todo={todoAujourdhui} onSelectOrder={(o) => { setView("dashboard"); setSelected(o); }} onRelancerTout={() => setShowBatch(true)} clientsARelancer={clientsARelancer} />
+          <TodayView
+            todo={todoAujourdhui}
+            onSelectOrder={(o) => { setView("dashboard"); setSelected(o); }}
+            onRelancerTout={() => setShowBatch(true)}
+            clientsARelancer={clientsARelancer}
+            monProfilCloser={monProfilCloser}
+            commandesNonAssigneesListe={monProfilCloser ? orders.filter((o) => !o.closer && (o.statut === "en_cours" || o.statut === "echouee")) : []}
+            onSeAttribuer={seAttribuerCommande}
+          />
         </div>
       )}
 
@@ -3072,7 +3103,7 @@ function RelancesHistorique({ orderId, onAdded }) {
   );
 }
 
-function TodayView({ todo, onSelectOrder, onRelancerTout, clientsARelancer = [] }) {
+function TodayView({ todo, onSelectOrder, onRelancerTout, clientsARelancer = [], monProfilCloser, commandesNonAssigneesListe = [], onSeAttribuer }) {
   const sections = [
     { key: "aRelivrer", title: "📅 À relivrer aujourd'hui", items: todo.aRelivrer, color: "#1a7a3c", bg: "#EAF3DE" },
     { key: "jamaisContactees", title: "🆕 Jamais contactées", items: todo.jamaisContactees, color: "#8A6412", bg: "#FBF3E3" },
@@ -3081,6 +3112,33 @@ function TodayView({ todo, onSelectOrder, onRelancerTout, clientsARelancer = [] 
 
   return (
     <div style={{ padding: "20px 20px 8px" }}>
+      {monProfilCloser && commandesNonAssigneesListe.length > 0 && (
+        <div style={{ background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 14, padding: "14px 16px", marginBottom: 18 }}>
+          <div style={{ fontWeight: 700, fontSize: 14.5, color: "#8A6412", marginBottom: 2 }}>
+            🆓 Non assignées — à prendre ({commandesNonAssigneesListe.length})
+          </div>
+          <div style={{ fontSize: 12, color: "#8A6412", marginBottom: 10 }}>
+            Personne n'a encore pris ces commandes. Une fois prise, elle disparaît pour les autres closers.
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {commandesNonAssigneesListe.slice(0, 8).map((o) => (
+              <div key={o.id} style={{ background: "white", borderRadius: 10, padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.client}</div>
+                  <div style={{ fontSize: 11.5, color: "#6B7168" }}>{o.produit} · {formatFCFA(o.montant)}</div>
+                </div>
+                <button
+                  onClick={() => onSeAttribuer(o.id, monProfilCloser.nom)}
+                  style={{ flexShrink: 0, background: "#e8920a", color: "white", border: "none", borderRadius: 8, padding: "8px 12px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}
+                >
+                  Je la prends
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
         <div>
           <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 22, marginBottom: 4 }}>Aujourd'hui</div>
@@ -3689,6 +3747,22 @@ function LivreurPortal({ livreur, orders, onStatus, toast }) {
     return Object.values(map).sort((a, b) => b.assignes - a.assignes);
   }, [orders]);
 
+  const bilanParJour = useMemo(() => {
+    const map = {};
+    confirmees.forEach((o) => {
+      const d = new Date(o.created_at);
+      const key = d.toISOString().slice(0, 10);
+      if (!map[key]) {
+        map[key] = { date: key, label: d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }), livrees: 0, gains: 0 };
+      }
+      map[key].livrees += 1;
+      map[key].gains += 1500;
+    });
+    return Object.values(map).sort((a, b) => (a.date < b.date ? 1 : -1));
+  }, [confirmees]);
+
+  const [showBilan, setShowBilan] = useState(false);
+
   const [enTournee, setEnTournee] = useState(!!livreur.en_tournee);
   const [gpsErreur, setGpsErreur] = useState(null);
   const watchIdRef = useRef(null);
@@ -3808,7 +3882,31 @@ function LivreurPortal({ livreur, orders, onStatus, toast }) {
           <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 22, color: "#e8920a", marginTop: 2 }}>
             {formatFCFA(confirmees.length * 1500)}
           </div>
+          {bilanParJour.length > 0 && (
+            <button
+              onClick={() => setShowBilan(!showBilan)}
+              style={{ marginTop: 8, background: "rgba(255,255,255,0.15)", border: "none", color: "white", borderRadius: 7, padding: "6px 10px", fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}
+            >
+              📊 {showBilan ? "Cacher" : "Voir"} mon bilan journalier
+            </button>
+          )}
         </div>
+
+        {showBilan && bilanParJour.length > 0 && (
+          <div style={{ marginTop: 10, background: "rgba(255,255,255,0.08)", borderRadius: 10, padding: "12px 14px" }}>
+            <div style={{ fontSize: 10.5, opacity: 0.75, textTransform: "uppercase", marginBottom: 8 }}>Bilan par jour</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {bilanParJour.map((j) => (
+                <div key={j.date} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5 }}>
+                  <span style={{ textTransform: "capitalize", opacity: 0.9 }}>{j.label}</span>
+                  <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600 }}>
+                    {j.livrees} livrée{j.livrees > 1 ? "s" : ""} · {formatFCFA(j.gains)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <div style={{ padding: "18px 20px" }}>
@@ -4350,6 +4448,24 @@ function ComptablePortal({ comptable, orders, livreurs }) {
   const totalCommandesProduits = produitsCA.reduce((s, p) => s + p.commandes, 0);
   const totalCAProduits = produitsCA.reduce((s, p) => s + p.ca, 0);
 
+  const produitsParLivreur = useMemo(() => {
+    const result = {};
+    livreurs.forEach((l) => {
+      const mesCommandes = ordersInRange.filter((o) => o.livreur === l.nom);
+      const map = {};
+      mesCommandes.forEach((o) => {
+        const { nom, quantite } = parseProduitTexte(o.produit);
+        if (!nom) return;
+        if (!map[nom]) map[nom] = { nom, pieces: 0, ca: 0 };
+        if (o.statut === "confirmee") {
+          map[nom].pieces += quantite;
+          map[nom].ca += Number(o.montant);
+        }
+      });
+      result[l.nom] = Object.values(map).sort((a, b) => b.ca - a.ca);
+    });
+    return result;
+  }, [livreurs, ordersInRange]);
 
   const totalDu = livreursStats.reduce((s, l) => s + l.montantDu, 0);
   const totalADeposer = livreursStats.reduce((s, l) => s + l.montantADeposer, 0);
@@ -4509,21 +4625,48 @@ function ComptablePortal({ comptable, orders, livreurs }) {
         )}
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {livreursStats.map((l) => (
-            <div key={l.id} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "14px 16px" }}>
-              <div style={{ fontWeight: 600, fontSize: 15 }}>{l.nom}</div>
-              <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{l.livrees} livraison{l.livrees > 1 ? "s" : ""} · {formatFCFA(l.montantRecupere)} encaissé</div>
-              <div style={{ marginTop: 8, background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 8, padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ fontSize: 12, color: "#8A6412", fontWeight: 600 }}>💵 Sa commission</span>
-                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 14, color: "#8A6412" }}>{formatFCFA(l.montantDu)}</span>
-              </div>
-              <div style={{ marginTop: 6, background: "#EAF3DE", border: "1px solid #C7DDA3", borderRadius: 8, padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ fontSize: 12, color: "#3B6D11", fontWeight: 600 }}>🏦 Doit déposer</span>
-                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 14, color: "#3B6D11" }}>{formatFCFA(l.montantADeposer)}</span>
-              </div>
-            </div>
+            <LivreurDetailComptable key={l.id} l={l} produits={produitsParLivreur[l.nom] || []} />
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+function LivreurDetailComptable({ l, produits }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "14px 16px" }}>
+      <div onClick={() => setOpen(!open)} style={{ cursor: "pointer" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ fontWeight: 600, fontSize: 15 }}>{l.nom}</div>
+          <span style={{ fontSize: 11.5, color: "#1a7a3c", fontWeight: 600 }}>{open ? "Fermer ▲" : "Voir le détail ▼"}</span>
+        </div>
+        <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{l.livrees} livraison{l.livrees > 1 ? "s" : ""} · {formatFCFA(l.montantRecupere)} encaissé</div>
+      </div>
+      <div style={{ marginTop: 8, background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 8, padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{ fontSize: 12, color: "#8A6412", fontWeight: 600 }}>💵 Sa commission</span>
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 14, color: "#8A6412" }}>{formatFCFA(l.montantDu)}</span>
+      </div>
+      <div style={{ marginTop: 6, background: "#EAF3DE", border: "1px solid #C7DDA3", borderRadius: 8, padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{ fontSize: 12, color: "#3B6D11", fontWeight: 600 }}>🏦 Doit déposer</span>
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 14, color: "#3B6D11" }}>{formatFCFA(l.montantADeposer)}</span>
+      </div>
+
+      {open && (
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #F0EEE6" }}>
+          <div style={{ fontSize: 11, color: "#8A9089", textTransform: "uppercase", marginBottom: 6 }}>CA par produit</div>
+          {produits.length === 0 && <div style={{ fontSize: 12.5, color: "#8A9089" }}>Aucune vente confirmée sur cette période.</div>}
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            {produits.map((p) => (
+              <div key={p.nom} style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}>
+                <span style={{ color: "#6B7168" }}>{p.nom} <span style={{ color: "#8A9089" }}>({p.pieces} pc)</span></span>
+                <span style={{ fontWeight: 600 }}>{formatFCFA(p.ca)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
