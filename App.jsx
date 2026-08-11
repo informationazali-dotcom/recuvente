@@ -4323,10 +4323,10 @@ function ComptablePortal({ comptable, orders, livreurs }) {
         const montantRecupere = livrees.reduce((s, o) => s + Number(o.montant), 0);
         const montantDu = livrees.length * COUT_LIVRAISON;
         const montantADeposer = montantRecupere - montantDu;
-        return { ...l, livrees: livrees.length, montantRecupere, montantDu, montantADeposer };
+        return { ...l, total: mesCommandes.length, livrees: livrees.length, montantRecupere, montantDu, montantADeposer };
       })
-      .filter((l) => l.livrees > 0)
-      .sort((a, b) => b.montantADeposer - a.montantADeposer);
+      .filter((l) => l.total > 0)
+      .sort((a, b) => b.total - a.total);
   }, [livreurs, ordersInRange]);
 
   const produitsCA = useMemo(() => {
@@ -4492,6 +4492,16 @@ function ComptablePortal({ comptable, orders, livreurs }) {
             </div>
           </div>
         )}
+
+        <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>📊 Résumé — commandes reçues par livreur ({periodLabelFromPreset(datePreset)})</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 20 }}>
+          {livreursStats.map((l) => (
+            <div key={l.id + "-resume"} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 8, padding: "9px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 13 }}><strong>{l.nom}</strong> a reçu</span>
+              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 14, color: "#1a7a3c" }}>{l.total} commande{l.total > 1 ? "s" : ""}</span>
+            </div>
+          ))}
+        </div>
 
         <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>Détail par livreur ({periodLabelFromPreset(datePreset)})</div>
         {livreursStats.length === 0 && (
