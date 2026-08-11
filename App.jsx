@@ -357,16 +357,25 @@ export default function App() {
   function playNotifSound() {
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const o = ctx.createOscillator();
-      const g = ctx.createGain();
-      o.connect(g);
-      g.connect(ctx.destination);
-      o.type = "sine";
-      o.frequency.value = 880;
-      g.gain.setValueAtTime(0.15, ctx.currentTime);
-      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
-      o.start();
-      o.stop(ctx.currentTime + 0.35);
+      // Son "cha-ching" à deux tons montants, façon Shopify
+      const notes = [
+        { freq: 987.77, start: 0, dur: 0.14 },   // Si
+        { freq: 1318.51, start: 0.1, dur: 0.28 }, // Mi (aigu)
+      ];
+      notes.forEach((n) => {
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.connect(g);
+        g.connect(ctx.destination);
+        o.type = "sine";
+        o.frequency.value = n.freq;
+        const start = ctx.currentTime + n.start;
+        g.gain.setValueAtTime(0, start);
+        g.gain.linearRampToValueAtTime(0.22, start + 0.015);
+        g.gain.exponentialRampToValueAtTime(0.001, start + n.dur);
+        o.start(start);
+        o.stop(start + n.dur);
+      });
     } catch (e) {}
   }
 
@@ -489,7 +498,19 @@ export default function App() {
       loadProduits();
       loadRelances();
     }, 15000);
-    return () => clearInterval(interval);
+
+    // Détection instantanée des nouvelles commandes (Shopify inclus), sans attendre le prochain cycle de 15s
+    const channel = supabase
+      .channel("commandes-temps-reel")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "commandes" }, () => {
+        loadOrders();
+      })
+      .subscribe();
+
+    return () => {
+      clearInterval(interval);
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const loaded = ordersLoaded && livreursLoaded && closersLoaded && comptablesLoaded && produitsLoaded;
