@@ -4520,6 +4520,7 @@ function ComptablePortal({ comptable, orders, livreurs }) {
 
 function ComptaDetailModal({ stats, livreursStats, coutLivraison, periodLabel, orders, livreurs, repartitionCloserLivreur, onClose }) {
   const actifs = livreursStats.filter((l) => l.livrees > 0);
+  const livreursAvecCommandes = livreursStats.filter((l) => l.total > 0).sort((a, b) => b.total - a.total);
   const totalDu = actifs.reduce((s, l) => s + (l.montantDu || 0), 0);
   const totalADeposer = actifs.reduce((s, l) => s + (l.montantRecupere - (l.montantDu || 0)), 0);
   const [ligneOuverte, setLigneOuverte] = useState(null);
@@ -4577,6 +4578,22 @@ function ComptaDetailModal({ stats, livreursStats, coutLivraison, periodLabel, o
             </div>
           ))}
         </div>
+
+        {livreursAvecCommandes.length > 0 && (
+          <div style={{ marginTop: 20 }}>
+            <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>
+              📊 Résumé — commandes reçues par livreur ({periodLabel})
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {livreursAvecCommandes.map((l) => (
+                <div key={l.id} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 8, padding: "9px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ fontSize: 13 }}><strong>{l.nom}</strong> a reçu</span>
+                  <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 14, color: "#1a7a3c" }}>{l.total} commande{l.total > 1 ? "s" : ""}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {repartitionCloserLivreur && repartitionCloserLivreur.length > 0 && (
           <div style={{ marginTop: 20 }}>
