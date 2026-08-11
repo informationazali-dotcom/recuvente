@@ -357,25 +357,31 @@ export default function App() {
   function playNotifSound() {
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      // Son "cha-ching" à deux tons montants, façon Shopify
-      const notes = [
-        { freq: 987.77, start: 0, dur: 0.14 },   // Si
-        { freq: 1318.51, start: 0.1, dur: 0.28 }, // Mi (aigu)
-      ];
-      notes.forEach((n) => {
-        const o = ctx.createOscillator();
-        const g = ctx.createGain();
-        o.connect(g);
-        g.connect(ctx.destination);
-        o.type = "sine";
-        o.frequency.value = n.freq;
-        const start = ctx.currentTime + n.start;
-        g.gain.setValueAtTime(0, start);
-        g.gain.linearRampToValueAtTime(0.22, start + 0.015);
-        g.gain.exponentialRampToValueAtTime(0.001, start + n.dur);
-        o.start(start);
-        o.stop(start + n.dur);
-      });
+
+      function jouerChaChing(decalage) {
+        const notes = [
+          { freq: 987.77, start: decalage, dur: 0.16, vol: 0.55 },       // Si
+          { freq: 1318.51, start: decalage + 0.1, dur: 0.32, vol: 0.6 },  // Mi (aigu)
+          { freq: 1975.53, start: decalage + 0.1, dur: 0.32, vol: 0.25 }, // Si aigu (harmonique, donne du corps)
+        ];
+        notes.forEach((n) => {
+          const o = ctx.createOscillator();
+          const g = ctx.createGain();
+          o.connect(g);
+          g.connect(ctx.destination);
+          o.type = "sine";
+          o.frequency.value = n.freq;
+          const start = ctx.currentTime + n.start;
+          g.gain.setValueAtTime(0, start);
+          g.gain.linearRampToValueAtTime(n.vol, start + 0.015);
+          g.gain.exponentialRampToValueAtTime(0.001, start + n.dur);
+          o.start(start);
+          o.stop(start + n.dur);
+        });
+      }
+
+      jouerChaChing(0);
+      jouerChaChing(0.55); // 2e passage pour être sûr d'être entendu
     } catch (e) {}
   }
 
