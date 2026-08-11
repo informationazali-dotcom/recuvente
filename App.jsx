@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { Phone, MessageCircle, MessageSquare, Plus, ChevronLeft, X, Check, Users, Truck, Trash2, Package, UserPlus, LogOut, ListChecks, Headset } from "lucide-react";
+import { Phone, MessageCircle, MessageSquare, Plus, ChevronLeft, X, Check, Users, Truck, Trash2, Package, UserPlus, LogOut, ListChecks, Headset, CheckCheck } from "lucide-react";
 import { jsPDF } from "jspdf";
 import { supabase } from "./supabaseClient";
 
@@ -635,6 +635,41 @@ export default function App() {
     return { count: map, last: lastByOrder };
   }, [allRelances]);
 
+  const validationsParJour = useMemo(() => {
+    const confirmeesAvecDate = orders.filter((o) => o.statut === "confirmee" && o.confirmed_at);
+    const map = {};
+    confirmeesAvecDate.forEach((o) => {
+      const dValidation = new Date(o.confirmed_at);
+      const keyValidation = dValidation.toISOString().slice(0, 10);
+      const dCreation = new Date(o.created_at);
+      const keyCreation = dCreation.toISOString().slice(0, 10);
+      const memeJour = keyValidation === keyCreation;
+      if (!map[keyValidation]) {
+        map[keyValidation] = {
+          date: keyValidation,
+          label: dValidation.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }),
+          orders: [],
+        };
+      }
+      map[keyValidation].orders.push({ ...o, memeJour, labelCreation: dCreation.toLocaleDateString("fr-FR", { day: "numeric", month: "short" }) });
+    });
+    return Object.values(map).sort((a, b) => (a.date < b.date ? 1 : -1));
+  }, [orders]);
+
+  const nonValideesParJour = useMemo(() => {
+    const nonValidees = orders.filter((o) => o.statut === "en_cours" || o.statut === "echouee");
+    const map = {};
+    nonValidees.forEach((o) => {
+      const d = new Date(o.created_at);
+      const key = d.toISOString().slice(0, 10);
+      if (!map[key]) {
+        map[key] = { date: key, label: d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }), orders: [] };
+      }
+      map[key].orders.push(o);
+    });
+    return Object.values(map).sort((a, b) => (a.date < b.date ? 1 : -1));
+  }, [orders]);
+
   const todoAujourdhui = useMemo(() => {
     const today = new Date();
     const todayStr = today.toISOString().slice(0, 10);
@@ -735,15 +770,17 @@ export default function App() {
     const current = orders.find((o) => o.id === id);
     const vraimentRecuperee = statut === "confirmee" && current?.statut === "echouee";
     const recupere = vraimentRecuperee ? true : current?.recupere;
-    const { error } = await supabase.from("commandes").update({ statut, recupere }).eq("id", id);
+    const nomValidateur = monProfilLivreur?.nom || monProfilCloser?.nom || "Admin";
+    const infosValidation = statut === "confirmee" ? { confirmed_at: new Date().toISOString(), confirmed_by: nomValidateur } : {};
+    const { error } = await supabase.from("commandes").update({ statut, recupere, ...infosValidation }).eq("id", id);
     if (error) {
       showToast("Erreur: " + error.message);
       return;
     }
     await loadOrders();
-    if (selected && selected.id === id) setSelected((s) => ({ ...s, statut }));
+    if (selected && selected.id === id) setSelected((s) => ({ ...s, statut, ...infosValidation }));
     if (current && current.statut !== statut) {
-      logEvent(id, `📋 Statut : ${STATUS[current.statut]?.label || current.statut} → ${STATUS[statut]?.label || statut}`);
+      logEvent(id, `📋 Statut : ${STATUS[current.statut]?.label || current.statut} → ${STATUS[statut]?.label || statut}${statut === "confirmee" ? ` par ${nomValidateur}` : ""}`);
     }
     if (vraimentRecuperee && current) {
       setCelebration({ montant: current.montant, client: current.client });
@@ -1418,6 +1455,7 @@ export default function App() {
         {[
           { key: "dashboard", label: "Commandes", icon: Package },
           { key: "today", label: "Aujourd'hui", icon: ListChecks },
+          { key: "validations", label: "Validations", icon: CheckCheck },
           { key: "clients", label: "Clients", icon: Users },
           { key: "livreurs", label: "Livreurs", icon: Truck },
           { key: "closers", label: "Closers", icon: Headset },
@@ -1981,6 +2019,16 @@ export default function App() {
         </div>
       )}
 
+      {view === "validations" && (
+        <div className="rv-fadein">
+          <ValidationsView
+            validationsParJour={validationsParJour}
+            nonValideesParJour={nonValideesParJour}
+            onSelectOrder={(o) => { setView("dashboard"); setSelected(o); }}
+          />
+        </div>
+      )}
+
       {view === "clients" && (
         <div className="rv-fadein">
           <ClientsView clients={clients} onSelect={setSelectedClient} />
@@ -2019,6 +2067,7 @@ export default function App() {
         {[
           { key: "dashboard", label: "Commandes", icon: Package },
           { key: "today", label: "Aujourd'hui", icon: ListChecks },
+          { key: "validations", label: "Validations", icon: CheckCheck },
           { key: "clients", label: "Clients", icon: Users },
           { key: "livreurs", label: "Livreurs", icon: Truck },
           { key: "closers", label: "Closers", icon: Headset },
@@ -3246,6 +3295,108 @@ function TodayView({ todo, onSelectOrder, onRelancerTout, clientsARelancer = [],
             ))}
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+function ValidationsView({ validationsParJour, nonValideesParJour, onSelectOrder }) {
+  const [tab, setTab] = useState("validees");
+
+  return (
+    <div style={{ padding: "20px 20px 8px" }}>
+      <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 22, marginBottom: 4 }}>Validations</div>
+      <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 16 }}>
+        Ce qui a été confirmé, jour par jour — et ce qui attend encore.
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
+        <button
+          onClick={() => setTab("validees")}
+          style={{ flex: 1, padding: "9px 0", borderRadius: 9, border: `1px solid ${tab === "validees" ? "#1a7a3c" : "#DDD8CC"}`, background: tab === "validees" ? "#1a7a3c" : "white", color: tab === "validees" ? "white" : "#16231F", fontWeight: 600, fontSize: 13 }}
+        >
+          ✅ Validées
+        </button>
+        <button
+          onClick={() => setTab("nonvalidees")}
+          style={{ flex: 1, padding: "9px 0", borderRadius: 9, border: `1px solid ${tab === "nonvalidees" ? "#D64933" : "#DDD8CC"}`, background: tab === "nonvalidees" ? "#D64933" : "white", color: tab === "nonvalidees" ? "white" : "#16231F", fontWeight: 600, fontSize: 13 }}
+        >
+          ⏳ Non validées
+        </button>
+      </div>
+
+      {tab === "validees" && (
+        <>
+          {validationsParJour.length === 0 && (
+            <div style={{ textAlign: "center", padding: "40px 20px", color: "#8A9089" }}>
+              <div style={{ fontSize: 14 }}>Aucune validation enregistrée pour l'instant.</div>
+              <div style={{ fontSize: 12, marginTop: 6 }}>Les nouvelles confirmations apparaîtront ici automatiquement.</div>
+            </div>
+          )}
+          {validationsParJour.map((group) => (
+            <div key={group.date} style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#1a7a3c", textTransform: "capitalize", marginBottom: 8 }}>
+                Validé {group.label} ({group.orders.length})
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {group.orders.map((o) => (
+                  <div key={o.id} onClick={() => onSelectOrder(o)} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 10, padding: "12px 14px", cursor: "pointer" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 14 }}>{o.client}</div>
+                        <div style={{ fontSize: 12, color: "#6B7168" }}>{o.produit}</div>
+                      </div>
+                      <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 14 }}>{formatFCFA(o.montant)}</div>
+                    </div>
+                    <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+                      {!o.memeJour && (
+                        <span style={{ fontSize: 10.5, fontWeight: 600, color: "#8A6412", background: "#FBF3E3", padding: "2px 8px", borderRadius: 999 }}>
+                          📅 commandée le {o.labelCreation}
+                        </span>
+                      )}
+                      {o.confirmed_by && (
+                        <span style={{ fontSize: 10.5, fontWeight: 600, color: "#1a7a3c", background: "#EAF3DE", padding: "2px 8px", borderRadius: 999 }}>
+                          ✅ validé par {o.confirmed_by}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+
+      {tab === "nonvalidees" && (
+        <>
+          {nonValideesParJour.length === 0 && (
+            <div style={{ textAlign: "center", padding: "40px 20px", color: "#8A9089" }}>
+              <div style={{ fontSize: 36, marginBottom: 10 }}>🎉</div>
+              <div style={{ fontSize: 14 }}>Tout est validé, rien en attente.</div>
+            </div>
+          )}
+          {nonValideesParJour.map((group) => (
+            <div key={group.date} style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#D64933", textTransform: "capitalize", marginBottom: 8 }}>
+                Commandée {group.label} ({group.orders.length})
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {group.orders.map((o) => (
+                  <div key={o.id} onClick={() => onSelectOrder(o)} style={{ background: "white", border: "1px solid #ECE8DC", borderLeft: `4px solid ${o.statut === "echouee" ? "#D64933" : "#E8A93D"}`, borderRadius: 10, padding: "12px 14px", cursor: "pointer" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 14 }}>{o.client}</div>
+                        <div style={{ fontSize: 12, color: "#6B7168" }}>{o.produit} · {o.statut === "echouee" ? "Échouée" : "En cours"}</div>
+                      </div>
+                      <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 14 }}>{formatFCFA(o.montant)}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </>
       )}
     </div>
   );
