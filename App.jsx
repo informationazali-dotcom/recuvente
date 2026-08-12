@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { Phone, MessageCircle, MessageSquare, Plus, ChevronLeft, X, Check, Users, Truck, Trash2, Package, UserPlus, LogOut, ListChecks, Headset, CheckCheck } from "lucide-react";
-import { jsPDF } from "jspdf";
 import { supabase } from "./supabaseClient";
 
 const STATUS = {
@@ -169,7 +168,8 @@ function numeroFacture(order) {
   return `AZ-${y}${m}-${short}`;
 }
 
-function genererFacturePDF(order) {
+async function genererFacturePDF(order) {
+  const { jsPDF } = await import("jspdf");
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   const green = [26, 122, 60];
   const orange = [232, 146, 10];
