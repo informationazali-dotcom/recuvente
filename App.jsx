@@ -107,8 +107,13 @@ function exportCSV(orders) {
     o.livreur || "",
     new Date(o.created_at).toLocaleDateString("fr-FR"),
   ]);
+  function neutraliser(valeur) {
+    const s = String(valeur ?? "");
+    if (/^[=+\-@\t\r]/.test(s)) return "'" + s;
+    return s;
+  }
   const csv = [headers, ...rows]
-    .map((row) => row.map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(";"))
+    .map((row) => row.map((cell) => `"${neutraliser(cell).replace(/"/g, '""')}"`).join(";"))
     .join("\n");
   const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
