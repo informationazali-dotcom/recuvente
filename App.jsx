@@ -4022,7 +4022,43 @@ function AddCloser({ onClose, onAdd }) {
 }
 
 function LivreurPortal({ livreur, orders, onStatus, toast }) {
-  const actives = orders.filter((o) => o.statut === "en_cours" || o.statut === "echouee");
+  const [datePreset, setDatePreset] = useState("toutes");
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
+
+  const dateRange = useMemo(() => {
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    let start, end;
+    if (datePreset === "aujourdhui") {
+      start = startOfToday;
+      end = new Date(startOfToday.getTime() + 86400000);
+    } else if (datePreset === "hier") {
+      start = new Date(startOfToday.getTime() - 86400000);
+      end = startOfToday;
+    } else if (datePreset === "avanthier") {
+      start = new Date(startOfToday.getTime() - 2 * 86400000);
+      end = new Date(startOfToday.getTime() - 86400000);
+    } else if (datePreset === "semaine") {
+      const day = startOfToday.getDay();
+      const diff = day === 0 ? 6 : day - 1;
+      start = new Date(startOfToday.getTime() - diff * 86400000);
+      end = new Date(now.getTime() + 60000);
+    } else if (datePreset === "personnalise" && customStart && customEnd) {
+      start = new Date(customStart + "T00:00:00");
+      end = new Date(customEnd + "T23:59:59");
+    } else {
+      start = new Date(0);
+      end = new Date(now.getTime() + 60000);
+    }
+    return { start, end };
+  }, [datePreset, customStart, customEnd]);
+
+  const activesToutes = orders.filter((o) => o.statut === "en_cours" || o.statut === "echouee");
+  const actives = activesToutes.filter((o) => {
+    const d = new Date(o.created_at);
+    return d >= dateRange.start && d < dateRange.end;
+  });
   const confirmees = orders.filter((o) => o.statut === "confirmee");
 
   const produitsDetail = useMemo(() => {
@@ -4218,6 +4254,37 @@ function LivreurPortal({ livreur, orders, onStatus, toast }) {
             </div>
           </div>
         )}
+
+        <div style={{ display: "flex", gap: 6, marginBottom: 14, overflowX: "auto" }}>
+          {[
+            { key: "toutes", label: "Toutes" },
+            { key: "aujourdhui", label: "Aujourd'hui" },
+            { key: "hier", label: "Hier" },
+            { key: "avanthier", label: "Avant-hier" },
+            { key: "semaine", label: "Cette semaine" },
+            { key: "personnalise", label: "Personnalisé" },
+          ].map((d) => (
+            <button
+              key={d.key}
+              onClick={() => setDatePreset(d.key)}
+              style={{ padding: "6px 13px", borderRadius: 999, border: `1px solid ${datePreset === d.key ? "#1a7a3c" : "#DDD8CC"}`, background: datePreset === d.key ? "#1a7a3c" : "white", color: datePreset === d.key ? "white" : "#16231F", fontSize: 12.5, fontWeight: 500, whiteSpace: "nowrap", flexShrink: 0 }}
+            >
+              {d.label}
+            </button>
+          ))}
+        </div>
+
+        {datePreset === "personnalise" && (
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 14 }}>
+            <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 13 }} />
+            <span style={{ color: "#8A9089", fontSize: 12 }}>à</span>
+            <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 13 }} />
+          </div>
+        )}
+
+        <div style={{ fontSize: 12.5, color: "#8A9089", marginBottom: 10 }}>
+          {actives.length} commande{actives.length > 1 ? "s" : ""} à traiter{datePreset !== "toutes" ? " sur cette période" : ""}
+        </div>
 
         {actives.length === 0 ? (
           <div style={{ textAlign: "center", padding: "50px 20px", color: "#8A9089" }}>
