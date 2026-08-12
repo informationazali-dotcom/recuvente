@@ -354,6 +354,46 @@ export default function App() {
     typeof Notification !== "undefined" ? Notification.permission : "unsupported"
   );
 
+  const VAPID_PUBLIC_KEY = "BPvSwnx9c3S8a78HAXZRGgmUw859riej4B2ESkap1Ab40DP0VsYRjTLLqmZ1TTEkmHmfw5A4VjZcjmepewO0OsI";
+
+  function urlBase64ToUint8Array(base64String) {
+    const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+    const rawData = window.atob(base64);
+    return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
+  }
+
+  async function activerNotificationsPush() {
+    try {
+      const permission = await Notification.requestPermission();
+      setNotifPermission(permission);
+      if (permission !== "granted") return;
+
+      if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+        showToast("Notifications Push non supportées sur ce navigateur");
+        return;
+      }
+
+      const registration = await navigator.serviceWorker.ready;
+      let subscription = await registration.pushManager.getSubscription();
+      if (!subscription) {
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+        });
+      }
+
+      const raw = subscription.toJSON();
+      await supabase.from("push_subscriptions").upsert(
+        [{ email: session.user.email, endpoint: raw.endpoint, p256dh: raw.keys.p256dh, auth: raw.keys.auth }],
+        { onConflict: "endpoint" }
+      );
+      showToast("🔔 Notifications activées, même app fermée !");
+    } catch (e) {
+      showToast("Erreur activation notifications: " + e.message);
+    }
+  }
+
   function playNotifSound() {
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -1689,9 +1729,9 @@ export default function App() {
 
       {notifPermission === "default" && (
         <div style={{ margin: "14px 20px 0", background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 12, padding: "12px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-          <span style={{ fontSize: 12.5, color: "#8A6412" }}>🔔 Active les notifications pour être alerté des nouvelles commandes</span>
+          <span style={{ fontSize: 12.5, color: "#8A6412" }}>🔔 Active les notifications pour être alerté des nouvelles commandes, même app fermée</span>
           <button
-            onClick={() => Notification.requestPermission().then((p) => setNotifPermission(p))}
+            onClick={activerNotificationsPush}
             style={{ background: "#e8920a", color: "#16231F", border: "none", borderRadius: 8, padding: "7px 12px", fontSize: 12.5, fontWeight: 700, flexShrink: 0 }}
           >
             Activer
