@@ -1450,6 +1450,12 @@ function WorkspaceDashboard({ workspace, session, subscription }) {
             >
               💳 Mon abonnement
             </button>
+            <button
+              onClick={() => setShowIntegrations(true)}
+              style={{ display: "flex", alignItems: "center", padding: "11px 12px", borderRadius: 9, border: "none", background: "transparent", color: "rgba(255,255,255,0.6)", fontSize: 14, fontWeight: 500, textAlign: "left", marginBottom: 3, cursor: "pointer" }}
+            >
+              🔌 Intégrations
+            </button>
           </>
         )}
         <div style={{ marginTop: "auto" }}>
@@ -1484,19 +1490,6 @@ function WorkspaceDashboard({ workspace, session, subscription }) {
             <span className="rv-livedot" style={{ width: 6, height: 6, borderRadius: "50%", background: "#7fd6a3", display: "inline-block", marginLeft: 4 }} />
             <span style={{ fontSize: 9.5, fontWeight: 500, opacity: 0.65 }}>EN DIRECT</span>
             <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-              {workspace.role === "owner" && (
-                <>
-                  <button onClick={() => setShowTeam(true)} aria-label="Gérer l'équipe" style={{ background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: "6px 8px", borderRadius: 7, fontSize: 13, cursor: "pointer" }}>
-                    👥
-                  </button>
-                  <button onClick={() => setShowAbonnement(true)} aria-label="Mon abonnement" style={{ background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: "6px 8px", borderRadius: 7, fontSize: 13, cursor: "pointer" }}>
-                    💳
-                  </button>
-                  <button onClick={() => setShowIntegrations(true)} aria-label="Intégrations" style={{ background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: "6px 8px", borderRadius: 7, fontSize: 13, cursor: "pointer" }}>
-                    🔌
-                  </button>
-                </>
-              )}
               <button onClick={() => supabase.auth.signOut()} aria-label="Déconnexion" style={{ background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: "6px 10px", borderRadius: 7, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>
                 ⏻ Déconnexion
               </button>
