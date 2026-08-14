@@ -49,6 +49,34 @@ export default async function handler(req, res) {
       ? `${order.shipping_address.city || ""}, ${order.shipping_address.address1 || ""}`.trim()
       : "";
 
+    // Détecte automatiquement si la commande est à Abidjan ou à expédier ailleurs,
+    // selon la ville renseignée sur Shopify.
+    const villeNormalisee = (order.shipping_address?.city || "").toLowerCase().trim();
+    const estAbidjan = villeNormalisee.includes("abidjan") || villeNormalisee === "";
+    const typeLivraison = estAbidjan ? "abidjan" : "expedition";
+    const fraisExpedition = estAbidjan ? 0 : Number(order.total_shipping_price_set?.shop_money?.amount || 0);
+
+    // Attribution automatique au closer ayant le moins de commandes actives en ce moment
+    let closerAssigne = null;
+    const { data: closersList } = await supabase.from("closers").select("nom");
+    if (closersList && closersList.length > 0) {
+      const { data: commandesActives } = await supabase
+        .from("commandes")
+        .select("closer")
+        .in("statut", ["en_cours", "echouee"])
+        .not("closer", "is", null);
+
+      const charge = {};
+      closersList.forEach((c) => (charge[c.nom] = 0));
+      (commandesActives || []).forEach((o) => {
+        if (charge[o.closer] !== undefined) charge[o.closer] += 1;
+      });
+
+      closerAssigne = closersList.reduce((min, c) =>
+        charge[c.nom] < charge[min.nom] ? c : min
+      , closersList[0]).nom;
+    }
+
     const { error } = await supabase.from("commandes").insert([
       {
         client: client || "Client Shopify",
@@ -59,6 +87,9 @@ export default async function handler(req, res) {
         statut: "en_cours",
         derniere_tentative: `Importée depuis Shopify #${order.order_number || order.id}`,
         recupere: false,
+        closer: closerAssigne,
+        type_livraison: typeLivraison,
+        frais_expedition: fraisExpedition,
       },
     ]);
 
