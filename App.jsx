@@ -808,6 +808,10 @@ export default function App() {
 
   async function updateStatus(id, statut) {
     const current = orders.find((o) => o.id === id);
+    if (statut === "confirmee" && current?.type_livraison === "expedition" && !current?.depot_recu) {
+      showToast("⛔ Impossible de confirmer : le dépôt n'a pas encore été reçu");
+      return;
+    }
     const vraimentRecuperee = statut === "confirmee" && current?.statut === "echouee";
     const recupere = vraimentRecuperee ? true : current?.recupere;
     const nomValidateur = monProfilLivreur?.nom || monProfilCloser?.nom || "Admin";
@@ -2461,25 +2465,34 @@ function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, clos
         <div style={{ marginBottom: 14 }}>
           <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 6 }}>Statut</div>
           <div style={{ display: "flex", gap: 8 }}>
-            {Object.entries(STATUS).map(([key, val]) => (
-              <button
-                key={key}
-                onClick={() => onStatus(order.id, key)}
-                style={{
-                  flex: 1,
-                  padding: "8px 6px",
-                  borderRadius: 8,
-                  border: `1px solid ${order.statut === key ? val.color : "#DDD8CC"}`,
-                  background: order.statut === key ? val.bg : "white",
-                  color: order.statut === key ? val.color : "#6B7168",
-                  fontSize: 12.5,
-                  fontWeight: 600,
-                }}
-              >
-                {val.label}
-              </button>
-            ))}
+            {Object.entries(STATUS).map(([key, val]) => {
+              const bloqueDepot = key === "confirmee" && order.type_livraison === "expedition" && !order.depot_recu;
+              return (
+                <button
+                  key={key}
+                  onClick={() => !bloqueDepot && onStatus(order.id, key)}
+                  disabled={bloqueDepot}
+                  title={bloqueDepot ? "Le dépôt doit être reçu avant de confirmer" : undefined}
+                  style={{
+                    flex: 1,
+                    padding: "8px 6px",
+                    borderRadius: 8,
+                    border: `1px solid ${order.statut === key ? val.color : "#DDD8CC"}`,
+                    background: bloqueDepot ? "#F0EEE6" : order.statut === key ? val.bg : "white",
+                    color: bloqueDepot ? "#B0AB9E" : order.statut === key ? val.color : "#6B7168",
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    cursor: bloqueDepot ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {bloqueDepot ? "🔒 " + val.label : val.label}
+                </button>
+              );
+            })}
           </div>
+          {order.type_livraison === "expedition" && !order.depot_recu && (
+            <div style={{ fontSize: 11, color: "#B23A22", marginTop: 5 }}>Reçois d'abord le dépôt avant de pouvoir confirmer cette expédition.</div>
+          )}
         </div>
 
         <div style={{ marginBottom: 14 }}>
