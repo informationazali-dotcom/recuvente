@@ -833,7 +833,7 @@ export default function App() {
 
   async function addOrder(order) {
     const { error } = await supabase.from("commandes").insert([
-      { ...order, montant: Number(order.montant), recupere: false },
+      { ...order, montant: Number(order.montant), frais_expedition: Number(order.frais_expedition) || 0, montant_depot: Number(order.montant_depot) || 0, depot_recu_le: order.depot_recu ? new Date().toISOString() : null, recupere: false },
     ]);
     if (error) {
       showToast("Erreur: " + error.message);
@@ -1015,6 +1015,19 @@ export default function App() {
     if (selected && selected.id === orderId) setSelected((s) => ({ ...s, ...infos }));
     logEvent(orderId, `✏️ Informations modifiées`);
     showToast("Commande mise à jour");
+  }
+
+  async function marquerDepot(orderId, montant) {
+    const infos = { depot_recu: true, montant_depot: montant, depot_recu_le: new Date().toISOString() };
+    const { error } = await supabase.from("commandes").update(infos).eq("id", orderId);
+    if (error) {
+      showToast("Erreur: " + error.message);
+      return;
+    }
+    await loadOrders();
+    if (selected && selected.id === orderId) setSelected((s) => ({ ...s, ...infos }));
+    logEvent(orderId, `💰 Dépôt reçu : ${montant.toLocaleString("fr-FR")} FCFA`);
+    showToast("Dépôt enregistré");
   }
 
   async function logEvent(orderId, note) {
@@ -2021,17 +2034,22 @@ export default function App() {
                     <div>
                       <div style={{ fontWeight: 600, fontSize: 14.5 }}>{o.client}</div>
                       <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{o.produit} · {o.zone}</div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
                         <span style={{ fontSize: 11.5, color: s.color, fontWeight: 500 }}>{o.derniere_tentative}</span>
                         {relanceCountByOrder.count[o.id] > 0 && (
                           <span style={{ fontSize: 10.5, color: "#1a7a3c", background: "#EAF3DE", padding: "1px 7px", borderRadius: 999, fontWeight: 600 }}>
                             {relanceCountByOrder.count[o.id]} relance{relanceCountByOrder.count[o.id] > 1 ? "s" : ""}
                           </span>
                         )}
+                        {o.type_livraison === "expedition" && (
+                          <span style={{ fontSize: 10.5, fontWeight: 600, color: o.depot_recu ? "#3B6D11" : "#B23A22", background: o.depot_recu ? "#EAF3DE" : "#FBEAE6", padding: "1px 7px", borderRadius: 999 }}>
+                            📦 {o.depot_recu ? "Dépôt reçu" : "En attente dépôt"}
+                          </span>
+                        )}
                       </div>
                     </div>
                     <div style={{ textAlign: "right" }}>
-                      <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 15 }}>{formatFCFA(o.montant)}</div>
+                      <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 15 }}>{formatFCFA(o.montant + (o.frais_expedition || 0))}</div>
                       <div style={{ fontSize: 11, marginTop: 4, padding: "2px 8px", borderRadius: 999, background: s.bg, color: s.color, display: "inline-block", fontWeight: 500 }}>
                         {s.label}
                       </div>
@@ -2178,6 +2196,7 @@ export default function App() {
           onReschedule={rescheduleOrder}
           onRelanceAdded={loadRelances}
           onUpdateInfos={updateOrderInfos}
+          onMarquerDepot={marquerDepot}
         />
       )}
       {showAdd && <AddOrder onClose={() => setShowAdd(false)} onAdd={addOrder} />}
@@ -2305,7 +2324,7 @@ function StatusDonut({ livrees, enAttente, echouees }) {
   );
 }
 
-function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, closers, onAssignCloser, onReschedule, onRelanceAdded, onUpdateInfos }) {
+function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, closers, onAssignCloser, onReschedule, onRelanceAdded, onUpdateInfos, onMarquerDepot }) {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ client: order.client, tel: order.tel, zone: order.zone, produit: order.produit, montant: order.montant });
   const [saving, setSaving] = useState(false);
@@ -2372,6 +2391,39 @@ function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, clos
           <div style={{ fontWeight: 600, marginTop: 2 }}>{order.produit}</div>
           <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 20, marginTop: 6, color: "#1a7a3c" }}>{formatFCFA(order.montant)}</div>
         </div>
+        )}
+
+        {!editing && order.type_livraison === "expedition" && (
+          <div style={{ background: order.depot_recu ? "#EAF3DE" : "#FBEAE6", border: `1px solid ${order.depot_recu ? "#C7DDA3" : "#F0B8AC"}`, borderRadius: 12, padding: 14, marginBottom: 14 }}>
+            <div style={{ fontWeight: 700, fontSize: 13, color: order.depot_recu ? "#3B6D11" : "#B23A22", marginBottom: 8 }}>
+              📦 Expédition hors Abidjan
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 4 }}>
+              <span style={{ color: "#6B7168" }}>Frais d'expédition</span>
+              <span style={{ fontWeight: 600 }}>{formatFCFA(order.frais_expedition || 0)}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 8 }}>
+              <span style={{ color: "#6B7168" }}>Total à collecter</span>
+              <span style={{ fontWeight: 700 }}>{formatFCFA(order.montant + (order.frais_expedition || 0))}</span>
+            </div>
+            <div style={{ height: 1, background: "rgba(0,0,0,0.08)", margin: "8px 0" }} />
+            {order.depot_recu ? (
+              <div style={{ fontSize: 12.5, color: "#3B6D11", fontWeight: 600 }}>
+                ✅ Dépôt reçu : {formatFCFA(order.montant_depot || 0)}
+                {order.depot_recu_le && <div style={{ fontWeight: 400, fontSize: 11, marginTop: 2 }}>le {new Date(order.depot_recu_le).toLocaleDateString("fr-FR", { day: "numeric", month: "long" })}</div>}
+              </div>
+            ) : (
+              <button
+                onClick={() => {
+                  const montant = prompt("Montant du dépôt reçu (FCFA) :");
+                  if (montant && Number(montant) > 0) onMarquerDepot(order.id, Number(montant));
+                }}
+                style={{ width: "100%", background: "#1a7a3c", color: "white", border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, fontSize: 13, cursor: "pointer" }}
+              >
+                💰 Marquer le dépôt comme reçu
+              </button>
+            )}
+          </div>
         )}
 
         {livreurs && livreurs.length > 0 && (
@@ -2500,22 +2552,43 @@ function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, clos
 }
 
 function AddOrder({ onClose, onAdd }) {
-  const [form, setForm] = useState({ client: "", tel: "", produit: "", montant: "", zone: "", statut: "en_cours", derniere_tentative: "Nouvelle commande" });
+  const [form, setForm] = useState({ client: "", tel: "", produit: "", montant: "", zone: "", statut: "en_cours", derniere_tentative: "Nouvelle commande", type_livraison: "abidjan", frais_expedition: "", montant_depot: "", depot_recu: false });
   const montantValide = Number(form.montant) > 0;
+  const estExpedition = form.type_livraison === "expedition";
   const canSubmit = form.client.trim() && form.tel.trim() && form.produit.trim() && montantValide;
+
+  const totalAvecFrais = Number(form.montant || 0) + Number(form.frais_expedition || 0);
 
   return (
     <div className="rv-modal-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", zIndex: 50 }} onClick={onClose}>
-      <div className="rv-modal-sheet" onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", borderRadius: "18px 18px 0 0", padding: "18px 20px 28px" }}>
+      <div className="rv-modal-sheet" onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", borderRadius: "18px 18px 0 0", padding: "18px 20px 28px", maxHeight: "88vh", overflowY: "auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
           <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 19 }}>Nouvelle commande</div>
           <button onClick={onClose} style={{ background: "none", border: "none" }}><X size={20} /></button>
         </div>
 
+        <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 6 }}>Zone de livraison</label>
+        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+          <button
+            onClick={() => setForm({ ...form, type_livraison: "abidjan" })}
+            style={{ flex: 1, padding: "12px 10px", borderRadius: 10, border: `2px solid ${!estExpedition ? "#1a7a3c" : "#DDD8CC"}`, background: !estExpedition ? "#EAF3DE" : "white", textAlign: "left", cursor: "pointer" }}
+          >
+            <div style={{ fontWeight: 700, fontSize: 13 }}>🏍️ Abidjan</div>
+            <div style={{ fontSize: 10.5, color: "#6B7168" }}>Paiement à la livraison</div>
+          </button>
+          <button
+            onClick={() => setForm({ ...form, type_livraison: "expedition" })}
+            style={{ flex: 1, padding: "12px 10px", borderRadius: 10, border: `2px solid ${estExpedition ? "#e8920a" : "#DDD8CC"}`, background: estExpedition ? "#FBF3E3" : "white", textAlign: "left", cursor: "pointer" }}
+          >
+            <div style={{ fontWeight: 700, fontSize: 13 }}>📦 Hors Abidjan</div>
+            <div style={{ fontSize: 10.5, color: "#6B7168" }}>Expédition avec dépôt</div>
+          </button>
+        </div>
+
         {["client", "tel", "produit", "montant", "zone"].map((field) => (
           <div key={field} style={{ marginBottom: 10 }}>
             <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4, textTransform: "capitalize" }}>
-              {field === "tel" ? "Téléphone" : field === "montant" ? "Montant (FCFA)" : field}
+              {field === "tel" ? "Téléphone" : field === "montant" ? "Montant produit (FCFA)" : field === "zone" ? (estExpedition ? "Ville / région" : "zone") : field}
             </label>
             <input
               value={form[field]}
@@ -2529,6 +2602,35 @@ function AddOrder({ onClose, onAdd }) {
             )}
           </div>
         ))}
+
+        {estExpedition && (
+          <div style={{ background: "white", border: "1px solid #F0DDA8", borderRadius: 12, padding: "14px 16px", marginBottom: 10 }}>
+            <div style={{ fontWeight: 700, fontSize: 13, color: "#8A6412", marginBottom: 10 }}>📦 Détails expédition</div>
+
+            <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4 }}>Frais d'expédition (FCFA)</label>
+            <input
+              value={form.frais_expedition}
+              onChange={(e) => setForm({ ...form, frais_expedition: e.target.value })}
+              type="number"
+              style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, background: "white", marginBottom: 10, boxSizing: "border-box" }}
+            />
+
+            {totalAvecFrais > 0 && (
+              <div style={{ background: "#FBF3E3", borderRadius: 8, padding: "8px 10px", marginBottom: 10, fontSize: 12.5, color: "#8A6412" }}>
+                Total à collecter : <strong>{totalAvecFrais.toLocaleString("fr-FR")} FCFA</strong>
+              </div>
+            )}
+
+            <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4 }}>Montant du dépôt reçu (FCFA)</label>
+            <input
+              value={form.montant_depot}
+              onChange={(e) => setForm({ ...form, montant_depot: e.target.value, depot_recu: Number(e.target.value) > 0 })}
+              type="number"
+              style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, background: "white", boxSizing: "border-box" }}
+            />
+            <div style={{ fontSize: 11, color: "#8A9089", marginTop: 4 }}>Laisse à 0 si le dépôt n'a pas encore été reçu — le colis ne sera pas marqué prêt à expédier.</div>
+          </div>
+        )}
 
         <button
           disabled={!canSubmit}
@@ -4350,7 +4452,7 @@ function LivreurPortal({ livreur, orders, onStatus, toast }) {
   );
 }
 
-function CloserPortal({ closer, orders, relanceCountByOrder, onStatus, onReschedule, onRelanceAdded, toast }) {
+function CloserPortal({ closer, orders, relanceCountByOrder, onStatus, onReschedule, onRelanceAdded, toast, onMarquerDepot }) {
   const [selected, setSelected] = useState(null);
 
   const todo = useMemo(() => {
@@ -4548,6 +4650,7 @@ function CloserPortal({ closer, orders, relanceCountByOrder, onStatus, onResched
           onStatus={(id, statut) => { onStatus(id, statut); setSelected(null); }}
           onReschedule={onReschedule}
           onRelanceAdded={onRelanceAdded}
+          onMarquerDepot={onMarquerDepot}
         />
       )}
 
