@@ -228,6 +228,9 @@ async function genererFacturePDF(order) {
     doc.text(order.zone, 15, y, { maxWidth: 90 });
   }
 
+  const estExpedition = order.type_livraison === "expedition" && Number(order.frais_expedition) > 0;
+  const totalFacture = Number(order.montant) + (estExpedition ? Number(order.frais_expedition) : 0);
+
   // Tableau produit
   y += 14;
   doc.setFillColor(...green);
@@ -246,8 +249,14 @@ async function genererFacturePDF(order) {
   doc.rect(15, y, 180, 12);
   doc.text(order.produit || "", 18, y + 8, { maxWidth: 130 });
   doc.text(formatFCFA(order.montant), 190, y + 8, { align: "right" });
-
   y += 12;
+
+  if (estExpedition) {
+    doc.rect(15, y, 180, 10);
+    doc.text("Frais d'expédition (hors Abidjan)", 18, y + 7, { maxWidth: 130 });
+    doc.text(formatFCFA(order.frais_expedition), 190, y + 7, { align: "right" });
+    y += 10;
+  }
 
   // Total
   y += 8;
@@ -261,7 +270,7 @@ async function genererFacturePDF(order) {
   doc.text("TOTAL", 120, y);
   doc.setTextColor(...orange);
   doc.setFontSize(14);
-  doc.text(formatFCFA(order.montant), 195, y, { align: "right" });
+  doc.text(formatFCFA(totalFacture), 195, y, { align: "right" });
 
   // Statut paiement
   y += 12;
@@ -2334,7 +2343,7 @@ function StatusDonut({ livrees, enAttente, echouees }) {
 
 function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, closers, onAssignCloser, onReschedule, onRelanceAdded, onUpdateInfos, onMarquerDepot }) {
   const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState({ client: order.client, tel: order.tel, zone: order.zone, produit: order.produit, montant: order.montant });
+  const [form, setForm] = useState({ client: order.client, tel: order.tel, zone: order.zone, produit: order.produit, montant: order.montant, type_livraison: order.type_livraison || "abidjan", frais_expedition: order.frais_expedition, montant_depot: order.montant_depot, depot_recu: order.depot_recu });
   const [saving, setSaving] = useState(false);
 
   async function enregistrer() {
@@ -2345,6 +2354,10 @@ function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, clos
       zone: form.zone,
       produit: form.produit,
       montant: Number(form.montant),
+      type_livraison: form.type_livraison || "abidjan",
+      frais_expedition: Number(form.frais_expedition) || 0,
+      montant_depot: Number(form.montant_depot) || 0,
+      depot_recu: !!form.depot_recu,
     });
     setSaving(false);
     setEditing(false);
@@ -2377,6 +2390,23 @@ function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, clos
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+            <div>
+              <label style={{ fontSize: 11, color: "#8A9089", display: "block", marginBottom: 3 }}>Zone de livraison</label>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  onClick={() => setForm({ ...form, type_livraison: "abidjan" })}
+                  style={{ flex: 1, padding: "8px 6px", borderRadius: 8, border: `2px solid ${(form.type_livraison || "abidjan") !== "expedition" ? "#1a7a3c" : "#DDD8CC"}`, background: (form.type_livraison || "abidjan") !== "expedition" ? "#EAF3DE" : "white", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+                >
+                  🏍️ Abidjan
+                </button>
+                <button
+                  onClick={() => setForm({ ...form, type_livraison: "expedition" })}
+                  style={{ flex: 1, padding: "8px 6px", borderRadius: 8, border: `2px solid ${form.type_livraison === "expedition" ? "#e8920a" : "#DDD8CC"}`, background: form.type_livraison === "expedition" ? "#FBF3E3" : "white", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+                >
+                  📦 Hors Abidjan
+                </button>
+              </div>
+            </div>
             {["client", "tel", "produit", "montant", "zone"].map((f) => (
               <div key={f}>
                 <label style={{ fontSize: 11, color: "#8A9089", display: "block", marginBottom: 3, textTransform: "capitalize" }}>
@@ -2390,6 +2420,28 @@ function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, clos
                 />
               </div>
             ))}
+            {form.type_livraison === "expedition" && (
+              <>
+                <div>
+                  <label style={{ fontSize: 11, color: "#8A9089", display: "block", marginBottom: 3 }}>Frais d'expédition (FCFA)</label>
+                  <input
+                    value={form.frais_expedition ?? order.frais_expedition ?? ""}
+                    onChange={(e) => setForm({ ...form, frais_expedition: e.target.value })}
+                    type="number"
+                    style={{ width: "100%", padding: "9px 11px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 13.5, background: "white" }}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: 11, color: "#8A9089", display: "block", marginBottom: 3 }}>Montant du dépôt reçu (FCFA)</label>
+                  <input
+                    value={form.montant_depot ?? order.montant_depot ?? ""}
+                    onChange={(e) => setForm({ ...form, montant_depot: e.target.value, depot_recu: Number(e.target.value) > 0 })}
+                    type="number"
+                    style={{ width: "100%", padding: "9px 11px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 13.5, background: "white" }}
+                  />
+                </div>
+              </>
+            )}
           </div>
         )}
 
