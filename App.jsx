@@ -96,7 +96,7 @@ function ResumeMultiPeriodes({ orders, livreurs, dark }) {
 }
 
 function exportCSV(orders) {
-  const headers = ["Client", "Téléphone", "Produit", "Montant", "Zone", "Statut", "Livreur", "Date"];
+  const headers = ["Client", "Téléphone", "Produit", "Montant", "Zone", "Statut", "Livreur", "Type", "Frais expédition", "Dépôt reçu", "Date"];
   const rows = orders.map((o) => [
     o.client,
     o.tel,
@@ -105,6 +105,9 @@ function exportCSV(orders) {
     o.zone || "",
     STATUS[o.statut]?.label || o.statut,
     o.livreur || "",
+    o.type_livraison === "expedition" ? "Hors Abidjan" : "Abidjan",
+    o.type_livraison === "expedition" ? o.frais_expedition || 0 : "",
+    o.type_livraison === "expedition" ? (o.depot_recu ? "Oui" : "Non") : "",
     new Date(o.created_at).toLocaleDateString("fr-FR"),
   ]);
   function neutraliser(valeur) {
@@ -2078,6 +2081,7 @@ export default function App() {
             monProfilCloser={monProfilCloser}
             commandesNonAssigneesListe={monProfilCloser ? orders.filter((o) => !o.closer && (o.statut === "en_cours" || o.statut === "echouee")) : []}
             onSeAttribuer={seAttribuerCommande}
+            enAttenteDepot={orders.filter((o) => o.type_livraison === "expedition" && !o.depot_recu && (o.statut === "en_cours" || o.statut === "echouee"))}
           />
         </div>
       )}
@@ -3312,7 +3316,7 @@ function RelancesHistorique({ orderId, onAdded }) {
   );
 }
 
-function TodayView({ todo, onSelectOrder, onRelancerTout, clientsARelancer = [], monProfilCloser, commandesNonAssigneesListe = [], onSeAttribuer }) {
+function TodayView({ todo, onSelectOrder, onRelancerTout, clientsARelancer = [], monProfilCloser, commandesNonAssigneesListe = [], onSeAttribuer, enAttenteDepot = [] }) {
   const sections = [
     { key: "aRelivrer", title: "📅 À relivrer aujourd'hui", items: todo.aRelivrer, color: "#1a7a3c", bg: "#EAF3DE" },
     { key: "jamaisContactees", title: "🆕 Jamais contactées", items: todo.jamaisContactees, color: "#8A6412", bg: "#FBF3E3" },
@@ -3342,6 +3346,25 @@ function TodayView({ todo, onSelectOrder, onRelancerTout, clientsARelancer = [],
                 >
                   Je la prends
                 </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {enAttenteDepot.length > 0 && (
+        <div style={{ background: "#FBEAE6", border: "1px solid #F0B8AC", borderRadius: 14, padding: "14px 16px", marginBottom: 18 }}>
+          <div style={{ fontWeight: 700, fontSize: 14.5, color: "#B23A22", marginBottom: 2 }}>
+            📦 Expéditions en attente de dépôt ({enAttenteDepot.length})
+          </div>
+          <div style={{ fontSize: 12, color: "#B23A22", marginBottom: 10 }}>
+            Ces colis ne peuvent pas partir tant que le dépôt n'est pas reçu.
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {enAttenteDepot.slice(0, 8).map((o) => (
+              <div key={o.id} onClick={() => onSelectOrder(o)} style={{ background: "white", borderRadius: 10, padding: "10px 12px", cursor: "pointer" }}>
+                <div style={{ fontWeight: 600, fontSize: 13.5 }}>{o.client}</div>
+                <div style={{ fontSize: 11.5, color: "#6B7168" }}>{o.produit} · {formatFCFA(o.montant + (o.frais_expedition || 0))} à collecter</div>
               </div>
             ))}
           </div>
