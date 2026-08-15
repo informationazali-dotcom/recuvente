@@ -639,12 +639,12 @@ export default function App() {
     const confirmees = ordersInRange.filter((o) => o.statut === "confirmee");
     const echouees = ordersInRange.filter((o) => o.statut === "echouee");
     const enCours = ordersInRange.filter((o) => o.statut === "en_cours");
-    const recupere = ordersInRange.reduce((sum, o) => sum + (o.recupere ? Number(o.montant) : 0), 0);
-    const chiffreAffaires = ordersInRange.reduce((sum, o) => sum + Number(o.montant), 0);
+    const recupere = ordersInRange.reduce((sum, o) => sum + (o.recupere ? Number(o.montant) + Number(o.frais_expedition || 0) : 0), 0);
+    const chiffreAffaires = ordersInRange.reduce((sum, o) => sum + Number(o.montant) + Number(o.frais_expedition || 0), 0);
     const tauxLivraison = ordersInRange.length ? Math.round((confirmees.length / ordersInRange.length) * 100) : 0;
     const tauxEchec = ordersInRange.length ? Math.round((echouees.length / ordersInRange.length) * 100) : 0;
     const coutLivraisons = confirmees.length * COUT_LIVRAISON;
-    const montantConfirme = confirmees.reduce((sum, o) => sum + Number(o.montant), 0);
+    const montantConfirme = confirmees.reduce((sum, o) => sum + Number(o.montant) + Number(o.frais_expedition || 0), 0);
 
     let coutProduitsTotal = 0;
     let nbCoutInconnu = 0;
@@ -4890,8 +4890,8 @@ function ComptablePortal({ comptable, orders, livreurs }) {
     const confirmees = ordersInRange.filter((o) => o.statut === "confirmee");
     const echouees = ordersInRange.filter((o) => o.statut === "echouee");
     const enCours = ordersInRange.filter((o) => o.statut === "en_cours");
-    const chiffreAffaires = ordersInRange.reduce((s, o) => s + Number(o.montant), 0);
-    const montantConfirme = confirmees.reduce((s, o) => s + Number(o.montant), 0);
+    const chiffreAffaires = ordersInRange.reduce((s, o) => s + Number(o.montant) + Number(o.frais_expedition || 0), 0);
+    const montantConfirme = confirmees.reduce((s, o) => s + Number(o.montant) + Number(o.frais_expedition || 0), 0);
     const coutLivraisons = confirmees.length * COUT_LIVRAISON;
     const beneficeReel = montantConfirme - coutLivraisons;
     return { total: ordersInRange.length, confirmees: confirmees.length, echouees: echouees.length, enCours: enCours.length, chiffreAffaires, montantConfirme, coutLivraisons, beneficeReel };
