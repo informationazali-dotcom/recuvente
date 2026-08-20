@@ -4333,12 +4333,6 @@ function CloserPortalSaas({ closer, commandes, currency, workspace, onStatusChan
     await onStatusChanged();
   }
 
-  async function confirmerDepotRecu(commandeId) {
-    await supabase.from("commandes").update({ depot_recu_closer: true }).eq("id", commandeId);
-    await supabase.from("relances").insert([{ commande_id: commandeId, note: `📦 Dépôt reçu confirmé par ${closer.nom}` }]);
-    await onStatusChanged();
-  }
-
   return (
     <div style={{ minHeight: "100vh", background: "#FAFAF7", fontFamily: "'IBM Plex Sans', sans-serif" }}>
       <div style={{ background: "#1a7a3c", color: "white", padding: 20 }}>
@@ -4434,12 +4428,6 @@ function CloserPortalSaas({ closer, commandes, currency, workspace, onStatusChan
                 <div onClick={() => setSelected(selected === c.id ? null : c.id)} style={{ cursor: "pointer" }}>
                   <div style={{ fontWeight: 700, fontSize: 15 }}>{c.client}</div>
                   <div style={{ fontSize: 13, color: "#6B7168", marginTop: 3 }}>{c.produit} · {c.tel}</div>
-                  {c.mode_vente === "expedition" && (
-                    <div style={{ fontSize: 12, color: "#2452E8", marginTop: 2, fontWeight: 600 }}>
-                      📦 Expédition{c.ville_expedition ? ` → ${c.ville_expedition}` : ""}
-                      {c.expedition_confirmee ? " · ✅ confirmée" : c.depot_recu_closer ? " · en attente livreur" : " · dépôt à confirmer"}
-                    </div>
-                  )}
                   <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 16, marginTop: 6, color: "#1a7a3c" }}>{Number(c.montant).toLocaleString("fr-FR")} {currency}</div>
                 </div>
 
@@ -4457,42 +4445,6 @@ function CloserPortalSaas({ closer, commandes, currency, workspace, onStatusChan
                         💬 WhatsApp
                       </a>
                     </div>
-
-                    {c.mode_vente === "expedition" && (
-                      <div style={{ marginBottom: 10 }}>
-                        {!c.depot_recu_closer ? (
-                          <button
-                            onClick={() => confirmerDepotRecu(c.id)}
-                            style={{ width: "100%", background: "#2452E8", color: "white", border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, fontSize: 13, cursor: "pointer" }}
-                          >
-                            📦 Confirmer dépôt reçu du client{c.ville_expedition ? ` (→ ${c.ville_expedition})` : ""}
-                          </button>
-                        ) : !c.expedition_confirmee ? (
-                          <div style={{ background: "#EAF0FB", border: "1px solid #C3D4F0", borderRadius: 8, padding: "9px 12px", fontSize: 12, color: "#1E4B8C", fontWeight: 600 }}>
-                            ✅ Dépôt reçu — colis remis au livreur pour {c.ville_expedition || "expédition"}, en attente de sa confirmation.
-                          </div>
-                        ) : null}
-
-                        {c.photo_recu_expedition && (
-                          <div style={{ marginTop: 8 }}>
-                            <img
-                              src={c.photo_recu_expedition}
-                              alt="Reçu d'expédition"
-                              style={{ width: "100%", borderRadius: 8, marginBottom: 8, border: "1px solid #ECE8DC" }}
-                            />
-                            <a
-                              href={`https://wa.me/${cleanPhoneForWhatsApp(c.tel)}?text=${encodeURIComponent(`Bonjour ${(c.client || "").split(" ")[0]} 👋, voici votre reçu d'expédition pour retirer votre colis à ${c.ville_expedition || "destination"} :\n\n${c.photo_recu_expedition}`)}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              style={{ display: "block", textAlign: "center", width: "100%", background: "#1F9D6E", color: "white", padding: "9px 0", borderRadius: 8, fontWeight: 700, fontSize: 12.5, textDecoration: "none", boxSizing: "border-box" }}
-                            >
-                              💬 Envoyer le reçu au client (WhatsApp)
-                            </a>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
                     <div style={{ display: "flex", gap: 8 }}>
                       <button onClick={() => changerStatut(c.id, "confirmee")} style={{ flex: 1, background: "#1F9D6E", color: "white", border: "none", padding: "10px 0", borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
                         ✅ Confirmer
