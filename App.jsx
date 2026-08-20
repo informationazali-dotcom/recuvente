@@ -2483,6 +2483,30 @@ function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, clos
                 💰 Marquer le dépôt comme reçu
               </button>
             )}
+
+            {order.expedition_confirmee && order.photo_recu_expedition && (
+              <div style={{ marginTop: 12 }}>
+                <img
+                  src={order.photo_recu_expedition}
+                  alt="Reçu d'expédition"
+                  style={{ width: "100%", borderRadius: 8, marginBottom: 8, border: "1px solid #ECE8DC" }}
+                />
+                <a
+                  href={`https://wa.me/${cleanPhoneForWhatsApp(order.tel)}?text=${encodeURIComponent(`Bonjour ${order.client.split(" ")[0]} 👋, voici votre reçu d'expédition pour retirer votre colis à ${order.zone || "destination"} :\n\n${order.photo_recu_expedition}`)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ display: "block", textAlign: "center", width: "100%", background: "#1F9D6E", color: "white", padding: "10px 0", borderRadius: 8, fontWeight: 700, fontSize: 12.5, textDecoration: "none", boxSizing: "border-box" }}
+                >
+                  💬 Envoyer le reçu au client (WhatsApp)
+                </a>
+              </div>
+            )}
+
+            {order.depot_recu && !order.expedition_confirmee && (
+              <div style={{ marginTop: 10, background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 8, padding: "8px 10px", fontSize: 11.5, color: "#8A6412" }}>
+                ⏳ En attente que le livreur confirme l'expédition avec une photo du reçu.
+              </div>
+            )}
           </div>
         )}
 
@@ -4259,7 +4283,41 @@ function LivreurPortal({ livreur, orders, onStatus, toast }) {
     const d = new Date(o.created_at);
     return d >= dateRange.start && d < dateRange.end;
   });
+  const actives_livraison = actives.filter((o) => o.type_livraison !== "expedition");
+  const actives_expedition = actives.filter((o) => o.type_livraison === "expedition");
   const confirmees = orders.filter((o) => o.statut === "confirmee");
+  const [ongletActif, setOngletActif] = useState("livraison");
+  const [envoiPhotoId, setEnvoiPhotoId] = useState(null);
+
+  async function confirmerExpedition(orderId, fichierPhoto) {
+    if (!fichierPhoto) return;
+    if (fichierPhoto.size > 5 * 1024 * 1024) {
+      alert("La photo est trop lourde (max 5 Mo). Choisis une photo plus légère.");
+      return;
+    }
+
+    setEnvoiPhotoId(orderId);
+    const extension = fichierPhoto.name.split(".").pop();
+    const chemin = `${orderId}-${Date.now()}.${extension}`;
+    const { error: erreurUpload } = await supabase.storage.from("expeditions").upload(chemin, fichierPhoto, { upsert: true });
+    if (erreurUpload) {
+      alert("Erreur lors de l'envoi de la photo : " + erreurUpload.message);
+      setEnvoiPhotoId(null);
+      return;
+    }
+
+    const { data } = supabase.storage.from("expeditions").getPublicUrl(chemin);
+    await supabase.from("commandes").update({
+      photo_recu_expedition: data.publicUrl,
+      expedition_confirmee: true,
+      expedition_confirmee_le: new Date().toISOString(),
+      statut: "confirmee",
+      confirmed_at: new Date().toISOString(),
+      confirmed_by: livreur.nom,
+    }).eq("id", orderId);
+    await supabase.from("relances").insert([{ commande_id: orderId, note: `📦 Expédition confirmée par ${livreur.nom}, reçu photographié` }]);
+    setEnvoiPhotoId(null);
+  }
 
   const produitsDetail = useMemo(() => {
     const map = {};
@@ -4482,18 +4540,32 @@ function LivreurPortal({ livreur, orders, onStatus, toast }) {
           </div>
         )}
 
-        <div style={{ fontSize: 12.5, color: "#8A9089", marginBottom: 10 }}>
-          {actives.length} commande{actives.length > 1 ? "s" : ""} à traiter{datePreset !== "toutes" ? " sur cette période" : ""}
-        </div>
+        {actives_expedition.length > 0 && (
+          <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+            <button
+              onClick={() => setOngletActif("livraison")}
+              style={{ flex: 1, padding: "9px 0", borderRadius: 9, border: `1px solid ${ongletActif === "livraison" ? "#1a7a3c" : "#DDD8CC"}`, background: ongletActif === "livraison" ? "#1a7a3c" : "white", color: ongletActif === "livraison" ? "white" : "#16231F", fontWeight: 600, fontSize: 13 }}
+            >
+              🏍️ Abidjan ({actives_livraison.length})
+            </button>
+            <button
+              onClick={() => setOngletActif("expedition")}
+              style={{ flex: 1, padding: "9px 0", borderRadius: 9, border: `1px solid ${ongletActif === "expedition" ? "#2452E8" : "#DDD8CC"}`, background: ongletActif === "expedition" ? "#2452E8" : "white", color: ongletActif === "expedition" ? "white" : "#16231F", fontWeight: 600, fontSize: 13 }}
+            >
+              📦 Expéditions ({actives_expedition.length})
+            </button>
+          </div>
+        )}
 
-        {actives.length === 0 ? (
+        {ongletActif === "livraison" && (
+        actives_livraison.length === 0 ? (
           <div style={{ textAlign: "center", padding: "50px 20px", color: "#8A9089" }}>
             <div style={{ fontSize: 40, marginBottom: 10 }}>🎉</div>
             <div style={{ fontSize: 14 }}>Aucune commande à traiter pour le moment.</div>
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {actives.map((o) => {
+            {actives_livraison.map((o) => {
               const s = STATUS[o.statut];
               return (
                 <div key={o.id} style={{ background: "white", border: "1px solid #ECE8DC", borderLeft: `4px solid ${s.color}`, borderRadius: 12, padding: "14px 16px" }}>
@@ -4528,6 +4600,53 @@ function LivreurPortal({ livreur, orders, onStatus, toast }) {
               );
             })}
           </div>
+        )
+        )}
+
+        {ongletActif === "expedition" && (
+          actives_expedition.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "50px 20px", color: "#8A9089" }}>
+              <div style={{ fontSize: 40, marginBottom: 10 }}>📦</div>
+              <div style={{ fontSize: 14 }}>Aucun colis à expédier pour le moment.</div>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {actives_expedition.map((o) => (
+                <div key={o.id} style={{ background: "white", border: "1px solid #ECE8DC", borderLeft: "4px solid #2452E8", borderRadius: 12, padding: "14px 16px" }}>
+                  <div style={{ fontWeight: 700, fontSize: 15.5 }}>{o.client}</div>
+                  <div style={{ fontSize: 13, color: "#6B7168", marginTop: 3 }}>{o.produit}</div>
+                  <div style={{ fontSize: 13, color: "#2452E8", marginTop: 2, fontWeight: 600 }}>📦 Destination : {o.zone || "non précisée"}</div>
+                  <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 17, marginTop: 8, color: "#1a7a3c" }}>{formatFCFA(o.montant + (o.frais_expedition || 0))}</div>
+
+                  {!o.depot_recu && (
+                    <div style={{ background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 8, padding: "8px 10px", marginTop: 10, fontSize: 11.5, color: "#8A6412" }}>
+                      ⏳ En attente — l'administrateur doit d'abord confirmer avoir reçu le dépôt du client.
+                    </div>
+                  )}
+
+                  {o.depot_recu && !o.expedition_confirmee && (
+                    <label style={{ display: "block", textAlign: "center", width: "100%", background: "#2452E8", color: "white", padding: "11px 0", borderRadius: 9, fontWeight: 700, fontSize: 13.5, cursor: "pointer", marginTop: 12, boxSizing: "border-box" }}>
+                      {envoiPhotoId === o.id ? "Envoi en cours..." : "📷 Confirmer l'expédition (photo du reçu)"}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        style={{ display: "none" }}
+                        onChange={(e) => confirmerExpedition(o.id, e.target.files?.[0])}
+                      />
+                    </label>
+                  )}
+
+                  {o.expedition_confirmee && (
+                    <div style={{ background: "#EAF3DE", border: "1px solid #C7DDA3", borderRadius: 8, padding: "9px 12px", marginTop: 10, fontSize: 12.5, color: "#3B6D11", fontWeight: 600, textAlign: "center" }}>
+                      ✅ Expédition confirmée
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )
+        )}
         )}
       </div>
 
