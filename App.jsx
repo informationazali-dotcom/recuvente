@@ -184,7 +184,6 @@ async function genererFacturePDF(order) {
   const gray = [107, 113, 104];
   const dark = [22, 35, 31];
 
-  // En-tête
   doc.setFillColor(...green);
   doc.rect(0, 0, 210, 32, "F");
   doc.setTextColor(255, 255, 255);
@@ -203,7 +202,6 @@ async function genererFacturePDF(order) {
   doc.setFont("helvetica", "normal");
   doc.text(numeroFacture(order), 195, 25, { align: "right" });
 
-  // Infos commande / client
   let y = 46;
   doc.setTextColor(...gray);
   doc.setFontSize(9);
@@ -231,7 +229,6 @@ async function genererFacturePDF(order) {
   const estExpedition = order.type_livraison === "expedition" && Number(order.frais_expedition) > 0;
   const totalFacture = Number(order.montant) + (estExpedition ? Number(order.frais_expedition) : 0);
 
-  // Tableau produit
   y += 14;
   doc.setFillColor(...green);
   doc.rect(15, y, 180, 9, "F");
@@ -258,7 +255,6 @@ async function genererFacturePDF(order) {
     y += 10;
   }
 
-  // Total
   y += 8;
   doc.setDrawColor(...green);
   doc.setLineWidth(0.5);
@@ -272,7 +268,6 @@ async function genererFacturePDF(order) {
   doc.setFontSize(14);
   doc.text(formatFCFA(totalFacture), 195, y, { align: "right" });
 
-  // Statut paiement
   y += 12;
   const statutPaiement = order.statut === "confirmee" ? "PAYÉE (à la livraison)" : "EN ATTENTE DE PAIEMENT";
   const couleurStatut = order.statut === "confirmee" ? green : orange;
@@ -283,7 +278,6 @@ async function genererFacturePDF(order) {
   doc.setFont("helvetica", "bold");
   doc.text(statutPaiement, 52.5, y + 6, { align: "center" });
 
-  // Pied de page
   doc.setTextColor(...gray);
   doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
@@ -417,9 +411,9 @@ export default function App() {
 
       function jouerChaChing(decalage) {
         const notes = [
-          { freq: 987.77, start: decalage, dur: 0.16, vol: 0.55 },       // Si
-          { freq: 1318.51, start: decalage + 0.1, dur: 0.32, vol: 0.6 },  // Mi (aigu)
-          { freq: 1975.53, start: decalage + 0.1, dur: 0.32, vol: 0.25 }, // Si aigu (harmonique, donne du corps)
+          { freq: 987.77, start: decalage, dur: 0.16, vol: 0.55 },
+          { freq: 1318.51, start: decalage + 0.1, dur: 0.32, vol: 0.6 },
+          { freq: 1975.53, start: decalage + 0.1, dur: 0.32, vol: 0.25 },
         ];
         notes.forEach((n) => {
           const o = ctx.createOscillator();
@@ -438,14 +432,14 @@ export default function App() {
       }
 
       jouerChaChing(0);
-      jouerChaChing(0.55); // 2e passage pour être sûr d'être entendu
+      jouerChaChing(0.55);
     } catch (e) {}
   }
 
   function playCelebrationSound() {
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const notes = [523.25, 659.25, 783.99]; // Do-Mi-Sol, accord satisfaisant
+      const notes = [523.25, 659.25, 783.99];
       notes.forEach((freq, i) => {
         const o = ctx.createOscillator();
         const g = ctx.createGain();
@@ -562,7 +556,6 @@ export default function App() {
       loadRelances();
     }, 15000);
 
-    // Détection instantanée des nouvelles commandes (Shopify inclus), sans attendre le prochain cycle de 15s
     const channel = supabase
       .channel("commandes-temps-reel")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "commandes" }, () => {
@@ -985,7 +978,6 @@ export default function App() {
   }
 
   async function seAttribuerCommande(orderId, closerNom) {
-    // Mise à jour conditionnelle : ne fonctionne QUE si personne ne l'a déjà prise entre-temps
     const { data, error } = await supabase
       .from("commandes")
       .update({ closer: closerNom })
@@ -1231,7 +1223,7 @@ export default function App() {
       const { nom, quantite } = parseProduitTexte(o.produit);
       if (!nom) return;
       if (!map[nom]) map[nom] = { commandees: 0, livrees: 0 };
-      if (o.statut !== "echouee") map[nom].commandees += quantite; // en_cours + confirmée = potentiellement engagé sur le stock
+      if (o.statut !== "echouee") map[nom].commandees += quantite;
       if (o.statut === "confirmee") map[nom].livrees += quantite;
     });
     return map;
@@ -1262,7 +1254,7 @@ export default function App() {
 
     const anomalies = [];
     Object.values(parProduitZone).forEach((g) => {
-      if (g.total < 5) return; // échantillon trop petit, pas fiable
+      if (g.total < 5) return;
       const tauxLocal = g.echecs / g.total;
       const global = globalParProduit[g.produit];
       const tauxGlobal = global && global.total > 0 ? global.echecs / global.total : 0;
@@ -4295,7 +4287,6 @@ function LivreurPortal({ livreur, orders, onStatus, toast }) {
       alert("La photo est trop lourde (max 5 Mo). Choisis une photo plus légère.");
       return;
     }
-
     setEnvoiPhotoId(orderId);
     const extension = fichierPhoto.name.split(".").pop();
     const chemin = `${orderId}-${Date.now()}.${extension}`;
@@ -4305,7 +4296,6 @@ function LivreurPortal({ livreur, orders, onStatus, toast }) {
       setEnvoiPhotoId(null);
       return;
     }
-
     const { data } = supabase.storage.from("expeditions").getPublicUrl(chemin);
     await supabase.from("commandes").update({
       photo_recu_expedition: data.publicUrl,
@@ -4540,6 +4530,10 @@ function LivreurPortal({ livreur, orders, onStatus, toast }) {
           </div>
         )}
 
+        <div style={{ fontSize: 12.5, color: "#8A9089", marginBottom: 10 }}>
+          {actives.length} commande{actives.length > 1 ? "s" : ""} à traiter{datePreset !== "toutes" ? " sur cette période" : ""}
+        </div>
+
         {actives_expedition.length > 0 && (
           <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
             <button
@@ -4647,7 +4641,6 @@ function LivreurPortal({ livreur, orders, onStatus, toast }) {
             </div>
           )
         )}
-        )}
       </div>
 
       {toast && (
@@ -4705,7 +4698,6 @@ function CloserPortal({ closer, orders, relanceCountByOrder, onStatus, onResched
   ];
 
   const montantRecupere = todo.confirmees.reduce((s, o) => s + Number(o.montant), 0);
-  const montantARisque = orders.filter((o) => o.statut === "en_cours" || o.statut === "echouee").reduce((s, o) => s + Number(o.montant), 0);
   const tauxConfirmation = orders.length ? Math.round((todo.confirmees.length / orders.length) * 100) : 0;
 
   return (
@@ -4886,7 +4878,7 @@ function CarteLivreurs({ livreurs }) {
       mapInstanceRef.current = window.L.map(mapRef.current, {
         zoomControl: true,
         attributionControl: true,
-      }).setView([5.359952, -4.008256], 12); // Abidjan par défaut
+      }).setView([5.359952, -4.008256], 12);
 
       window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         attribution: "© OpenStreetMap",
