@@ -1,19 +1,23 @@
- {
-  "id": "/",
+{
   "name": "RecuVente",
   "short_name": "RecuVente",
-  "description": "Récupérez vos ventes COD perdues",
+  "description": "Gestion de commandes, livreurs, closers et comptabilité",
   "start_url": "/",
-  "scope": "/",
   "display": "standalone",
   "background_color": "#FAFAF7",
   "theme_color": "#1a7a3c",
-  "orientation": "portrait",
-  "lang": "fr",
   "icons": [
-    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
-    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
   ]
 }
