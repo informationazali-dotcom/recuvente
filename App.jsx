@@ -2445,6 +2445,19 @@ function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, clos
         </div>
         )}
 
+        {!editing && order.type_livraison !== "expedition" && order.statut !== "confirmee" && (
+          <button
+            onClick={() => {
+              const ville = prompt("Vers quelle ville faut-il expédier ce colis ?", order.zone || "");
+              if (ville === null) return;
+              onUpdateInfos(order.id, { type_livraison: "expedition", zone: ville.trim() || order.zone });
+            }}
+            style={{ width: "100%", background: "white", border: "1px solid #2452E8", color: "#2452E8", borderRadius: 10, padding: "10px 0", fontWeight: 700, fontSize: 13, cursor: "pointer", marginBottom: 14 }}
+          >
+            📦 Marquer à expédier (hors Abidjan)
+          </button>
+        )}
+
         {!editing && order.type_livraison === "expedition" && (
           <div style={{ background: order.depot_recu ? "#EAF3DE" : "#FBEAE6", border: `1px solid ${order.depot_recu ? "#C7DDA3" : "#F0B8AC"}`, borderRadius: 12, padding: 14, marginBottom: 14 }}>
             <div style={{ fontWeight: 700, fontSize: 13, color: order.depot_recu ? "#3B6D11" : "#B23A22", marginBottom: 8 }}>
@@ -4620,7 +4633,7 @@ function LivreurPortal({ livreur, orders, onStatus, toast }) {
 
                   {o.depot_recu && !o.expedition_confirmee && (
                     <label style={{ display: "block", textAlign: "center", width: "100%", background: "#2452E8", color: "white", padding: "11px 0", borderRadius: 9, fontWeight: 700, fontSize: 13.5, cursor: "pointer", marginTop: 12, boxSizing: "border-box" }}>
-                      {envoiPhotoId === o.id ? "Envoi en cours..." : "📷 Confirmer l'expédition (photo du reçu)"}
+                      {envoiPhotoId === o.id ? "Envoi en cours..." : "📷 Confirmer produit expédié (photo du reçu)"}
                       <input
                         type="file"
                         accept="image/*"
