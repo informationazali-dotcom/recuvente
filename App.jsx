@@ -285,27 +285,18 @@ async function genererFacturePDF(order) {
 
   const nomFichier = `Facture-${numeroFacture(order)}.pdf`;
   const blob = doc.output("blob");
+  const fichier = new File([blob], nomFichier, { type: "application/pdf" });
 
-  try {
-    const chemin = `factures/${order.id}-${Date.now()}.pdf`;
-    const { error: erreurUpload } = await supabase.storage.from("expeditions").upload(chemin, blob, { contentType: "application/pdf", upsert: true });
-    if (erreurUpload) throw erreurUpload;
-    const { data } = supabase.storage.from("expeditions").getPublicUrl(chemin);
-    const message = `Bonjour ${order.client.split(" ")[0]} 🙏, voici votre facture Azali Express pour la commande "${order.produit}" :\n\n${data.publicUrl}`;
-    window.open(`https://wa.me/${cleanPhoneForWhatsApp(order.tel)}?text=${encodeURIComponent(message)}`, "_blank");
-  } catch (e) {
-    const fichier = new File([blob], nomFichier, { type: "application/pdf" });
-    if (navigator.canShare && navigator.canShare({ files: [fichier] })) {
-      navigator.share({
-        files: [fichier],
-        title: nomFichier,
-        text: `Voici votre facture Azali Express — ${order.produit}`,
-      }).catch(() => {
-        doc.save(nomFichier);
-      });
-    } else {
+  if (navigator.canShare && navigator.canShare({ files: [fichier] })) {
+    navigator.share({
+      files: [fichier],
+      title: nomFichier,
+      text: `Voici votre facture Azali Express — ${order.produit}`,
+    }).catch(() => {
       doc.save(nomFichier);
-    }
+    });
+  } else {
+    doc.save(nomFichier);
   }
 }
 
