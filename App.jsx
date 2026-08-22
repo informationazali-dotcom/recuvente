@@ -826,6 +826,15 @@ export default function App() {
       showToast("Erreur: " + error.message);
       return;
     }
+    if (statut === "confirmee") {
+      supabase.auth.getSession().then(({ data: sessionData }) => {
+        fetch("/api/facebook-capi", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionData.session?.access_token}` },
+          body: JSON.stringify({ commandeId: id }),
+        }).catch(() => {}); // silencieux — ne bloque jamais la confirmation si Facebook échoue
+      });
+    }
     await loadOrders();
     if (selected && selected.id === id) setSelected((s) => ({ ...s, statut, ...infosValidation }));
     if (current && current.statut !== statut) {
