@@ -2634,12 +2634,22 @@ function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, clos
           </a>
         )}
 
-        <button
-          onClick={() => genererFacturePDF(order)}
-          style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: "white", border: "1px solid #DDD8CC", color: "#16231F", padding: "12px 0", borderRadius: 10, fontWeight: 600, fontSize: 13.5, marginBottom: 14 }}
-        >
-          🧾 Envoyer / Télécharger la facture PDF
-        </button>
+        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+          <button
+            onClick={() => genererFacturePDF(order)}
+            style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "white", border: "1px solid #DDD8CC", color: "#16231F", padding: "12px 0", borderRadius: 10, fontWeight: 600, fontSize: 13 }}
+          >
+            🧾 Facture PDF
+          </button>
+          <a
+            href={`https://wa.me/${cleanPhoneForWhatsApp(order.tel)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "#EAF3DE", border: "1px solid #C7DDA3", color: "#3B6D11", padding: "12px 0", borderRadius: 10, fontWeight: 600, fontSize: 13, textDecoration: "none" }}
+          >
+            💬 Ouvrir WhatsApp du client
+          </a>
+        </div>
 
         <div style={{ display: "flex", gap: 10 }}>
           <a href={waLink(order)} target="_blank" rel="noopener noreferrer" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, background: "#1F9D6E", color: "white", padding: "12px 0", borderRadius: 10, fontWeight: 600, fontSize: 14, textDecoration: "none" }}>
@@ -4599,7 +4609,7 @@ function LivreurPortal({ livreur, orders, onStatus, toast }) {
                   </div>
                   <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                     <button
-                      onClick={() => onStatus(o.id, "confirmee")}
+                      onClick={() => setCommandeAConfirmer(o)}
                       style={{ flex: 1, background: "#1F9D6E", color: "white", border: "none", padding: "11px 0", borderRadius: 9, fontWeight: 700, fontSize: 13.5 }}
                     >
                       ✅ Confirmer
@@ -4667,6 +4677,38 @@ function LivreurPortal({ livreur, orders, onStatus, toast }) {
       {toast && (
         <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: "#16231F", color: "white", padding: "9px 18px", borderRadius: 999, fontSize: 13, fontWeight: 500 }}>
           {toast}
+        </div>
+      )}
+
+      {commandeAConfirmer && (
+        <div
+          onClick={() => setCommandeAConfirmer(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 60 }}
+        >
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "white", width: "100%", maxWidth: 420, borderRadius: "18px 18px 0 0", padding: "20px 18px 28px" }}>
+            <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>Comment le client a-t-il payé ?</div>
+            <div style={{ fontSize: 12.5, color: "#8A9089", marginBottom: 16 }}>{commandeAConfirmer.client} — {formatFCFA(commandeAConfirmer.montant)}</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {[
+                { key: "cash", label: "💵 Cash (espèces)" },
+                { key: "orange_money", label: "🟠 Orange Money" },
+                { key: "wave", label: "🌊 Wave" },
+                { key: "mtn_money", label: "🟡 MTN Money" },
+                { key: "moov_money", label: "🔵 Moov Money" },
+              ].map((mode) => (
+                <button
+                  key={mode.key}
+                  onClick={() => { onStatus(commandeAConfirmer.id, "confirmee", mode.key); setCommandeAConfirmer(null); }}
+                  style={{ background: "#FAFAF7", border: "1px solid #ECE8DC", borderRadius: 10, padding: "13px 16px", textAlign: "left", fontWeight: 600, fontSize: 14, cursor: "pointer" }}
+                >
+                  {mode.label}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setCommandeAConfirmer(null)} style={{ width: "100%", marginTop: 10, background: "none", border: "none", color: "#8A9089", fontSize: 13, padding: "8px 0", cursor: "pointer" }}>
+              Annuler
+            </button>
+          </div>
         </div>
       )}
     </div>
