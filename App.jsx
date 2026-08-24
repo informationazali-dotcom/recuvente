@@ -849,6 +849,28 @@ export default function App() {
   }
 
   async function addOrder(order) {
+    // Détecte une commande très similaire déjà passée récemment (même client, même produit)
+    // — évite d'envoyer deux livreurs pour la même personne par erreur
+    const deuxHeuresAvant = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    const { data: doublonsPotentiels } = await supabase
+      .from("commandes")
+      .select("id, produit, created_at, statut")
+      .eq("tel", order.tel)
+      .neq("statut", "echouee")
+      .gte("created_at", deuxHeuresAvant);
+
+    const doublon = (doublonsPotentiels || []).find((d) =>
+      d.produit?.toLowerCase().includes((order.produit || "").toLowerCase().split(" ")[0])
+    );
+
+    if (doublon) {
+      const minutesEcoulees = Math.round((Date.now() - new Date(doublon.created_at).getTime()) / 60000);
+      const continuer = window.confirm(
+        `⚠️ Ce client a déjà une commande similaire en cours, passée il y a ${minutesEcoulees} min.\n\nContinuer quand même et créer une deuxième commande ?`
+      );
+      if (!continuer) return;
+    }
+
     const { error } = await supabase.from("commandes").insert([
       { ...order, montant: Number(order.montant), frais_expedition: Number(order.frais_expedition) || 0, montant_depot: Number(order.montant_depot) || 0, depot_recu_le: order.depot_recu ? new Date().toISOString() : null, recupere: false },
     ]);
