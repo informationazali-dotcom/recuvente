@@ -904,6 +904,11 @@ export default function App() {
     showToast("Livreur retiré");
   }
 
+  async function toggleModeSimplifieLivreur(id, valeurActuelle) {
+    await supabase.from("livreurs").update({ mode_simplifie: !valeurActuelle }).eq("id", id);
+    await loadLivreurs();
+  }
+
   async function assignLivreur(orderId, livreurNom) {
     const { error } = await supabase.from("commandes").update({ livreur: livreurNom }).eq("id", orderId);
     if (error) {
@@ -2134,7 +2139,7 @@ export default function App() {
 
       {view === "livreurs" && (
         <div className="rv-fadein">
-          <LivreursView livreurs={livreursStats} onDelete={deleteLivreur} readOnly={!!monProfilCloser} periodLabel={periodLabel} />
+          <LivreursView livreurs={livreursStats} onDelete={deleteLivreur} onToggleModeSimplifie={toggleModeSimplifieLivreur} readOnly={!!monProfilCloser} periodLabel={periodLabel} />
         </div>
       )}
 
@@ -2975,7 +2980,7 @@ function ClientDetail({ client, onClose, onSelectOrder }) {
   );
 }
 
-function LivreursView({ livreurs, onDelete, readOnly, periodLabel }) {
+function LivreursView({ livreurs, onDelete, onToggleModeSimplifie, readOnly, periodLabel }) {
   const maxTaux = Math.max(...livreurs.map((l) => l.taux ?? 0), 1);
   const medailles = ["🥇", "🥈", "🥉"];
   const totalDu = livreurs.reduce((s, l) => s + (l.montantDu || 0), 0);
@@ -3038,6 +3043,17 @@ function LivreursView({ livreurs, onDelete, readOnly, periodLabel }) {
                   {i < 3 && total_ok(l) ? medailles[i] : null} {l.nom}
                 </div>
                 <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{l.telephone} · {l.zone}</div>
+                {!readOnly && (
+                  <button
+                    onClick={() => onToggleModeSimplifie(l.id, l.mode_simplifie)}
+                    style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", padding: 0, marginTop: 8, cursor: "pointer", fontSize: 11.5, color: l.mode_simplifie ? "#1a7a3c" : "#8A9089", fontWeight: 600 }}
+                  >
+                    <span style={{ width: 30, height: 17, borderRadius: 999, background: l.mode_simplifie ? "#1a7a3c" : "#DDD8CC", position: "relative", flexShrink: 0 }}>
+                      <span style={{ position: "absolute", top: 2, left: l.mode_simplifie ? 15 : 2, width: 13, height: 13, borderRadius: "50%", background: "white", transition: "left 0.15s" }} />
+                    </span>
+                    👁️ Mode simplifié (icônes, peu de lecture)
+                  </button>
+                )}
               </div>
               {!readOnly && (
                 <button onClick={() => onDelete(l.id)} style={{ background: "none", border: "none", color: "#D64933", padding: 6 }} aria-label="Retirer">
@@ -4366,6 +4382,49 @@ function AddCloser({ onClose, onAdd }) {
   );
 }
 
+function CarteCommandeSimplifiee({ c, onConfirmer, onEchoue }) {
+  return (
+    <div style={{ background: "white", border: "2px solid #ECE8DC", borderRadius: 18, padding: 18 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+        <div style={{ width: 50, height: 50, borderRadius: "50%", background: "#EAF3DE", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, flexShrink: 0 }}>
+          👤
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 17 }}>{c.client}</div>
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 22, color: "#1a7a3c" }}>{formatFCFA(c.montant)}</div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#FAFAF7", borderRadius: 12, padding: "10px 14px", marginBottom: 14 }}>
+        <span style={{ fontSize: 22 }}>📍</span>
+        <span style={{ fontSize: 15, fontWeight: 600 }}>{c.zone}</span>
+      </div>
+
+      <a
+        href={`tel:${c.tel}`}
+        style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, background: "#2452E8", color: "white", padding: "16px 0", borderRadius: 14, fontWeight: 700, fontSize: 18, textDecoration: "none", marginBottom: 10 }}
+      >
+        📞 {c.tel}
+      </a>
+
+      <div style={{ display: "flex", gap: 10 }}>
+        <button
+          onClick={onConfirmer}
+          style={{ flex: 1, background: "#1F9D6E", color: "white", border: "none", padding: "20px 0", borderRadius: 14, fontSize: 32, cursor: "pointer" }}
+        >
+          ✅
+        </button>
+        <button
+          onClick={onEchoue}
+          style={{ flex: 1, background: "#D64933", color: "white", border: "none", padding: "20px 0", borderRadius: 14, fontSize: 32, cursor: "pointer" }}
+        >
+          ❌
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function LivreurPortal({ livreur, orders, onStatus, toast }) {
   const [datePreset, setDatePreset] = useState("toutes");
   const [customStart, setCustomStart] = useState("");
@@ -4689,6 +4748,16 @@ function LivreurPortal({ livreur, orders, onStatus, toast }) {
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {actives_livraison.map((o) => {
+              if (livreur.mode_simplifie) {
+                return (
+                  <CarteCommandeSimplifiee
+                    key={o.id}
+                    c={o}
+                    onConfirmer={() => setCommandeAConfirmer(o)}
+                    onEchoue={() => onStatus(o.id, "echouee")}
+                  />
+                );
+              }
               const s = STATUS[o.statut];
               return (
                 <div key={o.id} style={{ background: "white", border: "1px solid #ECE8DC", borderLeft: `4px solid ${s.color}`, borderRadius: 12, padding: "14px 16px" }}>
