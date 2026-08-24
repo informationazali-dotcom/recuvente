@@ -1,136 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { Phone, MessageCircle, MessageSquare, Plus, ChevronLeft, X, Check, Users, Truck, Trash2, Package, UserPlus, LogOut, ListChecks, Headset, CheckCheck } from "lucide-react";
+import { Package, ListChecks, CheckCheck, Users, Truck, Headset, Calculator, Boxes } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { jsPDF } from "jspdf";
-
-const STATUS = {
-  confirmee: { label: "Confirmée", color: "#1F9D6E", bg: "#EAF7F1" },
-  en_cours: { label: "En cours", color: "#E8A93D", bg: "#FBF3E3" },
-  echouee: { label: "Échouée", color: "#D64933", bg: "#FBEAE6" },
-};
-
-const ADMIN_EMAIL = import.meta.env.VITE_ADMIN_EMAIL || "";
-
-function formatFCFA(n) {
-  return Number(n).toLocaleString("fr-FR").replace(/,/g, " ") + " F";
-}
-
-function parseProduitTexte(texte) {
-  if (!texte) return { nom: "", quantite: 1 };
-  const match = texte.match(/^(.*?)\s*x\s*(\d+)\s*$/i);
-  if (match) {
-    return { nom: match[1].trim(), quantite: Number(match[2]) || 1 };
-  }
-  return { nom: texte.trim(), quantite: 1 };
-}
-
-function getRangeForPreset(preset) {
-  const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  if (preset === "aujourdhui") {
-    return { start: startOfToday, end: new Date(startOfToday.getTime() + 86400000) };
-  }
-  if (preset === "hier") {
-    return { start: new Date(startOfToday.getTime() - 86400000), end: startOfToday };
-  }
-  if (preset === "semaine") {
-    const day = startOfToday.getDay();
-    const diff = day === 0 ? 6 : day - 1;
-    return { start: new Date(startOfToday.getTime() - diff * 86400000), end: new Date(now.getTime() + 60000) };
-  }
-  if (preset === "mois") {
-    return { start: new Date(now.getFullYear(), now.getMonth(), 1), end: new Date(now.getTime() + 60000) };
-  }
-  return { start: new Date(0), end: new Date(now.getTime() + 60000) };
-}
-
-const COUT_LIVRAISON_CONST = 1500;
-
-function calculerDepotPeriode(orders, livreurs, preset) {
-  const { start, end } = getRangeForPreset(preset);
-  const ordersP = orders.filter((o) => {
-    const d = new Date(o.created_at);
-    return d >= start && d < end;
-  });
-  const confirmees = ordersP.filter((o) => o.statut === "confirmee");
-  const montantConfirme = confirmees.reduce((s, o) => s + Number(o.montant), 0);
-  const commission = confirmees.length * COUT_LIVRAISON_CONST;
-  const aDeposer = montantConfirme - commission;
-  return { livraisons: confirmees.length, montantConfirme, commission, aDeposer };
-}
-
-function periodLabelFromPreset(preset) {
-  const labels = { aujourdhui: "Aujourd'hui", hier: "Hier", semaine: "Cette semaine", mois: "Ce mois", personnalise: "Période personnalisée" };
-  return labels[preset] || "";
-}
-
-function ResumeMultiPeriodes({ orders, livreurs, dark }) {
-  const presets = [
-    { key: "aujourdhui", label: "Aujourd'hui" },
-    { key: "hier", label: "Hier" },
-    { key: "semaine", label: "Cette semaine" },
-    { key: "mois", label: "Ce mois" },
-  ];
-  const lignes = presets.map((p) => ({ ...p, ...calculerDepotPeriode(orders, livreurs, p.key) }));
-
-  return (
-    <div style={{ background: dark ? "white" : "white", border: "1px solid #ECE8DC", borderRadius: 14, padding: "16px 18px", marginBottom: 16 }}>
-      <div style={{ fontSize: 11, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 12 }}>
-        🏦 Récapitulatif des dépôts — vue d'ensemble
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {lignes.map((l) => (
-          <div key={l.key} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: 10, borderBottom: "1px solid #F0EEE6" }}>
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>{l.label}</div>
-              <div style={{ fontSize: 11, color: "#8A9089", marginTop: 1 }}>{l.livraisons} livraison{l.livraisons > 1 ? "s" : ""}</div>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 15, color: "#3B6D11" }}>{formatFCFA(l.aDeposer)}</div>
-              <div style={{ fontSize: 10.5, color: "#8A9089" }}>à déposer</div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function exportCSV(orders) {
-  const headers = ["Client", "Téléphone", "Produit", "Montant", "Zone", "Statut", "Livreur", "Type", "Frais expédition", "Dépôt reçu", "Date"];
-  const rows = orders.map((o) => [
-    o.client,
-    o.tel,
-    o.produit,
-    o.montant,
-    o.zone || "",
-    STATUS[o.statut]?.label || o.statut,
-    o.livreur || "",
-    o.type_livraison === "expedition" ? "Hors Abidjan" : "Abidjan",
-    o.type_livraison === "expedition" ? o.frais_expedition || 0 : "",
-    o.type_livraison === "expedition" ? (o.depot_recu ? "Oui" : "Non") : "",
-    new Date(o.created_at).toLocaleDateString("fr-FR"),
-  ]);
-  function neutraliser(valeur) {
-    const s = String(valeur ?? "");
-    if (/^[=+\-@\t\r]/.test(s)) return "'" + s;
-    return s;
-  }
-  const csv = [headers, ...rows]
-    .map((row) => row.map((cell) => `"${neutraliser(cell).replace(/"/g, '""')}"`).join(";"))
-    .join("\n");
-  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `recuvente-export-${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-function scriptAppel(order) {
-  return `Bonjour ${order.client.split(" ")[0]}, je vous appelle au sujet de votre commande "${order.produit}" d'un montant de ${formatFCFA(order.montant)}. Êtes-vous toujours disponible pour la réception ? Nous pouvons livrer dans les prochaines 24h.`;
-}
 
 function cleanPhoneForWhatsApp(tel) {
   let digits = String(tel).replace(/\D/g, "");
@@ -139,44 +10,15 @@ function cleanPhoneForWhatsApp(tel) {
   return "225" + digits;
 }
 
-function waLink(order) {
-  const msg = `Bonjour ${order.client.split(" ")[0]} 👋, nous confirmons votre commande "${order.produit}" (${formatFCFA(order.montant)}). Un livreur passera bientôt. Merci de rester joignable.`;
-  return `https://wa.me/${cleanPhoneForWhatsApp(order.tel)}?text=${encodeURIComponent(msg)}`;
-}
-
-function smsMsg(order) {
-  return `Azali Express: Bonjour ${order.client.split(" ")[0]}, votre commande ${order.produit} (${formatFCFA(order.montant)}) sera livree bientot. Merci de rester joignable. Repondez OK pour confirmer.`;
-}
-
-function merciMsg(order) {
-  const date = new Date(order.created_at).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
-  return `Bonjour ${order.client.split(" ")[0]} 🙏, merci d'avoir commandé chez Azali Express !
-
-🧾 Reçu de votre commande
-Produit : ${order.produit}
-Montant : ${formatFCFA(order.montant)}
-Date : ${date}
-
-Votre colis vous a été livré avec succès ✅
-
-N'hésitez pas à découvrir nos autres produits : https://www.azaliexpress.com
-
-Merci pour votre confiance, à très bientôt ! 💚`;
-}
-
-function merciWaLink(order) {
-  return `https://wa.me/${cleanPhoneForWhatsApp(order.tel)}?text=${encodeURIComponent(merciMsg(order))}`;
-}
-
-function numeroFacture(order) {
-  const date = new Date(order.created_at);
+function numeroFacture(commande) {
+  const date = new Date(commande.created_at);
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
-  const short = order.id.replace(/-/g, "").slice(0, 6).toUpperCase();
-  return `AZ-${y}${m}-${short}`;
+  const short = commande.id.replace(/-/g, "").slice(0, 6).toUpperCase();
+  return `F-${y}${m}-${short}`;
 }
 
-async function genererFacturePDF(order) {
+async function genererFacturePDF(commande, workspace) {
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   const green = [26, 122, 60];
   const orange = [232, 146, 10];
@@ -187,19 +29,18 @@ async function genererFacturePDF(order) {
   doc.rect(0, 0, 210, 32, "F");
   doc.setTextColor(255, 255, 255);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(20);
-  doc.text("AZALI EXPRESS", 15, 18);
+  doc.setFontSize(18);
+  doc.text(workspace.name.toUpperCase(), 15, 18);
   doc.setFontSize(10);
   doc.setFont("helvetica", "normal");
-  doc.text("Abidjan, Côte d'Ivoire", 15, 25);
+  doc.text(workspace.country || "", 15, 25);
 
-  doc.setTextColor(255, 255, 255);
   doc.setFontSize(14);
   doc.setFont("helvetica", "bold");
   doc.text("FACTURE", 195, 18, { align: "right" });
   doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
-  doc.text(numeroFacture(order), 195, 25, { align: "right" });
+  doc.text(numeroFacture(commande), 195, 25, { align: "right" });
 
   let y = 46;
   doc.setTextColor(...gray);
@@ -211,22 +52,19 @@ async function genererFacturePDF(order) {
   doc.setTextColor(...dark);
   doc.setFontSize(12);
   doc.setFont("helvetica", "bold");
-  doc.text(order.client || "", 15, y);
+  doc.text(commande.client || "", 15, y);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
-  doc.text(new Date(order.created_at).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" }), 140, y);
+  doc.text(new Date(commande.created_at).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" }), 140, y);
 
   y += 6;
   doc.setFontSize(10);
   doc.setTextColor(...gray);
-  doc.text(order.tel || "", 15, y);
-  if (order.zone) {
+  doc.text(commande.tel || "", 15, y);
+  if (commande.zone) {
     y += 5;
-    doc.text(order.zone, 15, y, { maxWidth: 90 });
+    doc.text(commande.zone, 15, y, { maxWidth: 90 });
   }
-
-  const estExpedition = order.type_livraison === "expedition" && Number(order.frais_expedition) > 0;
-  const totalFacture = Number(order.montant) + (estExpedition ? Number(order.frais_expedition) : 0);
 
   y += 14;
   doc.setFillColor(...green);
@@ -243,18 +81,11 @@ async function genererFacturePDF(order) {
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10.5);
   doc.rect(15, y, 180, 12);
-  doc.text(order.produit || "", 18, y + 8, { maxWidth: 130 });
-  doc.text(formatFCFA(order.montant), 190, y + 8, { align: "right" });
-  y += 12;
+  doc.text(commande.produit || "", 18, y + 8, { maxWidth: 130 });
+  const montantTxt = `${Number(commande.montant).toLocaleString("fr-FR")} ${workspace.currency}`;
+  doc.text(montantTxt, 190, y + 8, { align: "right" });
 
-  if (estExpedition) {
-    doc.rect(15, y, 180, 10);
-    doc.text("Frais d'expédition (hors Abidjan)", 18, y + 7, { maxWidth: 130 });
-    doc.text(formatFCFA(order.frais_expedition), 190, y + 7, { align: "right" });
-    y += 10;
-  }
-
-  y += 8;
+  y += 20;
   doc.setDrawColor(...green);
   doc.setLineWidth(0.5);
   doc.line(120, y, 195, y);
@@ -265,11 +96,14 @@ async function genererFacturePDF(order) {
   doc.text("TOTAL", 120, y);
   doc.setTextColor(...orange);
   doc.setFontSize(14);
-  doc.text(formatFCFA(totalFacture), 195, y, { align: "right" });
+  doc.text(montantTxt, 195, y, { align: "right" });
 
   y += 12;
-  const statutPaiement = order.statut === "confirmee" ? "PAYÉE (à la livraison)" : "EN ATTENTE DE PAIEMENT";
-  const couleurStatut = order.statut === "confirmee" ? green : orange;
+  const estRetailFacture = workspace.activity_type === "retail";
+  const soldeRestant = Number(commande.montant) - Number(commande.montant_paye || 0);
+  const paiementPartiel = estRetailFacture && commande.montant_paye && soldeRestant > 0 && commande.statut !== "confirmee";
+  const statutPaiement = commande.statut === "confirmee" ? (estRetailFacture ? "PAYÉE" : "PAYÉE (à la livraison)") : paiementPartiel ? "ACOMPTE VERSÉ" : "EN ATTENTE DE PAIEMENT";
+  const couleurStatut = commande.statut === "confirmee" ? green : orange;
   doc.setFillColor(...couleurStatut);
   doc.roundedRect(15, y, 75, 9, 2, 2, "F");
   doc.setTextColor(255, 255, 255);
@@ -277,24 +111,26 @@ async function genererFacturePDF(order) {
   doc.setFont("helvetica", "bold");
   doc.text(statutPaiement, 52.5, y + 6, { align: "center" });
 
+  if (paiementPartiel) {
+    doc.setTextColor(...dark);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Déjà payé : ${Number(commande.montant_paye).toLocaleString("fr-FR")} ${workspace.currency} — Solde restant : ${soldeRestant.toLocaleString("fr-FR")} ${workspace.currency}`, 15, y + 16);
+    y += 8;
+  }
+
   doc.setTextColor(...gray);
   doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
-  doc.text("Merci pour votre confiance — Azali Express", 105, 280, { align: "center" });
+  doc.text(`Merci pour votre confiance — ${workspace.name}`, 105, 280, { align: "center" });
   doc.text("Paiement à la livraison (COD) — Facture générée automatiquement", 105, 285, { align: "center" });
 
-  const nomFichier = `Facture-${numeroFacture(order)}.pdf`;
+  const nomFichier = `Facture-${numeroFacture(commande)}.pdf`;
   const blob = doc.output("blob");
   const fichier = new File([blob], nomFichier, { type: "application/pdf" });
 
   if (navigator.canShare && navigator.canShare({ files: [fichier] })) {
-    navigator.share({
-      files: [fichier],
-      title: nomFichier,
-      text: `Voici votre facture Azali Express — ${order.produit}`,
-    }).catch(() => {
-      doc.save(nomFichier);
-    });
+    navigator.share({ files: [fichier], title: nomFichier }).catch(() => doc.save(nomFichier));
   } else {
     doc.save(nomFichier);
   }
@@ -302,138 +138,943 @@ async function genererFacturePDF(order) {
 
 export default function App() {
   const [session, setSession] = useState(undefined);
-  const [orders, setOrders] = useState([]);
-  const [livreurs, setLivreurs] = useState([]);
-  const [closers, setClosers] = useState([]);
-  const [comptables, setComptables] = useState([]);
-  const [catalogueProduits, setCatalogueProduits] = useState([]);
-  const [view, setView] = useState("dashboard");
-  const [filter, setFilter] = useState("toutes");
-  const [selected, setSelected] = useState(null);
-  const [showAdd, setShowAdd] = useState(false);
-  const [showAddLivreur, setShowAddLivreur] = useState(false);
-  const [showAddCloser, setShowAddCloser] = useState(false);
-  const [showAddComptable, setShowAddComptable] = useState(false);
-  const [showComptables, setShowComptables] = useState(false);
-  const [showComptaDetail, setShowComptaDetail] = useState(false);
-  const [showProduits, setShowProduits] = useState(false);
-  const [showAddProduit, setShowAddProduit] = useState(false);
-  const [showInvite, setShowInvite] = useState(false);
-  const [showTeam, setShowTeam] = useState(false);
-  const [showBatch, setShowBatch] = useState(false);
-  const [showCampagne, setShowCampagne] = useState(false);
-  const [celebration, setCelebration] = useState(null);
-  const [selectedClient, setSelectedClient] = useState(null);
-  const [ordersLoaded, setOrdersLoaded] = useState(false);
-  const [livreursLoaded, setLivreursLoaded] = useState(false);
-  const [closersLoaded, setClosersLoaded] = useState(false);
-  const [comptablesLoaded, setComptablesLoaded] = useState(false);
-  const [produitsLoaded, setProduitsLoaded] = useState(false);
-  const [toast, setToast] = useState(null);
-  const [error, setError] = useState(null);
-  const [datePreset, setDatePreset] = useState("aujourdhui");
-  const [customStart, setCustomStart] = useState("");
-  const [customEnd, setCustomEnd] = useState("");
+  const [workspace, setWorkspace] = useState(undefined);
+  const [loadingWorkspace, setLoadingWorkspace] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
-
-    async function handleVisible() {
-      if (document.visibilityState === "visible") {
-        const { data, error } = await supabase.auth.refreshSession();
-        if (!error && data.session) {
-          setSession(data.session);
-          loadOrders();
-          loadLivreurs();
-        }
-      }
-    }
-    document.addEventListener("visibilitychange", handleVisible);
-    window.addEventListener("focus", handleVisible);
-
-    return () => {
-      listener.subscription.unsubscribe();
-      document.removeEventListener("visibilitychange", handleVisible);
-      window.removeEventListener("focus", handleVisible);
-    };
+    const { data: listener } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
+    return () => listener.subscription.unsubscribe();
   }, []);
 
-  const knownOrderIds = useRef(null);
-  const [notifPermission, setNotifPermission] = useState(
-    typeof Notification !== "undefined" ? Notification.permission : "unsupported"
-  );
-
-  const VAPID_PUBLIC_KEY = "BPvSwnx9c3S8a78HAXZRGgmUw859riej4B2ESkap1Ab40DP0VsYRjTLLqmZ1TTEkmHmfw5A4VjZcjmepewO0OsI";
-
-  function urlBase64ToUint8Array(base64String) {
-    const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
-    const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
-    const rawData = window.atob(base64);
-    return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
-  }
-
-  async function activerNotificationsPush() {
-    try {
-      const permission = await Notification.requestPermission();
-      setNotifPermission(permission);
-      if (permission !== "granted") return;
-
-      if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
-        showToast("Notifications Push non supportées sur ce navigateur");
-        return;
-      }
-
-      const registration = await navigator.serviceWorker.ready;
-      let subscription = await registration.pushManager.getSubscription();
-      if (!subscription) {
-        subscription = await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
-        });
-      }
-
-      const raw = subscription.toJSON();
-      await supabase.from("push_subscriptions").upsert(
-        [{ email: session.user.email, endpoint: raw.endpoint, p256dh: raw.keys.p256dh, auth: raw.keys.auth }],
-        { onConflict: "endpoint" }
-      );
-      showToast("🔔 Notifications activées, même app fermée !");
-    } catch (e) {
-      showToast("Erreur activation notifications: " + e.message);
+  async function loadWorkspace() {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const userId = sessionData.session?.user?.id;
+    if (!userId) {
+      setWorkspace(null);
+      return;
+    }
+    const { data, error } = await supabase
+      .from("workspace_members")
+      .select("workspace_id, role, workspaces(id, name, country, currency, created_at, webhook_secret, activity_type, whatsapp_number, logo_url, banniere_url, couleur_marque, description_boutique, politique_livraison, politique_retours, politique_confidentialite, facebook_pixel_id, facebook_capi_token, facebook_url, instagram_url, tiktok_url)")
+      .eq("user_id", userId)
+      .limit(1)
+      .maybeSingle();
+    if (!error && data) {
+      setWorkspace({ ...data.workspaces, role: data.role });
+    } else {
+      setWorkspace(null);
     }
   }
 
-  function playNotifSound() {
-    try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const [subscription, setSubscription] = useState(undefined);
 
-      function jouerChaChing(decalage) {
-        const notes = [
-          { freq: 987.77, start: decalage, dur: 0.16, vol: 0.55 },
-          { freq: 1318.51, start: decalage + 0.1, dur: 0.32, vol: 0.6 },
-          { freq: 1975.53, start: decalage + 0.1, dur: 0.32, vol: 0.25 },
-        ];
-        notes.forEach((n) => {
-          const o = ctx.createOscillator();
-          const g = ctx.createGain();
-          o.connect(g);
-          g.connect(ctx.destination);
-          o.type = "sine";
-          o.frequency.value = n.freq;
-          const start = ctx.currentTime + n.start;
-          g.gain.setValueAtTime(0, start);
-          g.gain.linearRampToValueAtTime(n.vol, start + 0.015);
-          g.gain.exponentialRampToValueAtTime(0.001, start + n.dur);
-          o.start(start);
-          o.stop(start + n.dur);
-        });
-      }
-
-      jouerChaChing(0);
-      jouerChaChing(0.55);
-    } catch (e) {}
+  async function loadSubscription(workspaceId) {
+    const { data } = await supabase
+      .from("subscriptions")
+      .select("*, subscription_plans(nom, prix, devise, max_commandes_mois)")
+      .eq("workspace_id", workspaceId)
+      .maybeSingle();
+    setSubscription(data || null);
   }
+
+  useEffect(() => {
+    if (workspace && workspace.id) loadSubscription(workspace.id);
+  }, [workspace?.id]);
+
+  useEffect(() => {
+    if (session) loadWorkspace();
+  }, [session]);
+
+  async function creerWorkspace(nom, activityType, whatsappNumber) {
+    setLoadingWorkspace(true);
+    const { data: ws, error } = await supabase
+      .from("workspaces")
+      .insert([{ owner_id: session.user.id, name: nom, activity_type: activityType || "cod_ecommerce", whatsapp_number: whatsappNumber }])
+      .select()
+      .single();
+    if (error) {
+      alert("Erreur: " + error.message);
+      setLoadingWorkspace(false);
+      return;
+    }
+    await supabase.from("workspace_members").insert([
+      { workspace_id: ws.id, user_id: session.user.id, role: "owner" },
+    ]);
+    fetch("/api/notifications", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "welcome", email: session.user.email, workspaceName: nom }),
+    }).catch(() => {}); // silencieux si l'email échoue, ne bloque jamais l'inscription
+    await loadWorkspace();
+    setLoadingWorkspace(false);
+  }
+
+  if (session === undefined) return <Centered>Chargement…</Centered>;
+
+  const resetPwParam = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("resetpw") === "1";
+  if (resetPwParam && session) return <NouveauMotDePasseScreen />;
+
+  const pageParam = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("page") : null;
+  if (pageParam === "cgu" || pageParam === "confidentialite") return <PageLegale page={pageParam} />;
+
+  if (!session) {
+    const wantsAuth = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("auth") === "1";
+    const wantsLogin = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("login") === "1";
+    if (wantsLogin) return <AuthScreen modeInitial="login" />;
+    if (!wantsAuth) return <LandingPage />;
+    return <AuthScreen />;
+  }
+
+  const isAdminRoute = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("admin") === "1";
+  if (isAdminRoute) return <AdminPanel session={session} />;
+
+  if (workspace === undefined) return <Centered>Chargement de ton espace…</Centered>;
+  if (workspace === null) return <CreateWorkspaceScreen onCreate={creerWorkspace} loading={loadingWorkspace} />;
+
+  return <WorkspaceDashboard workspace={workspace} session={session} subscription={subscription} />;
+}
+
+function Centered({ children }) {
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'IBM Plex Sans', sans-serif", background: "#FAFAF7" }}>
+      {children}
+    </div>
+  );
+}
+
+function LandingPage() {
+  const [plans, setPlans] = useState([]);
+  const [faqOuverte, setFaqOuverte] = useState(null);
+  const [profil, setProfil] = useState("cod");
+  const [statsPlateforme, setStatsPlateforme] = useState(null);
+
+  useEffect(() => {
+    supabase.from("subscription_plans").select("*").order("prix").then(({ data }) => setPlans(data || []));
+    supabase.rpc("statistiques_plateforme_publiques").then(({ data }) => {
+      if (data && data[0]) setStatsPlateforme(data[0]);
+    });
+  }, []);
+
+  useEffect(() => {
+    const pixelId = import.meta.env.VITE_RECUVENTE_PIXEL_ID;
+    if (!pixelId || window.fbq) return;
+    !(function (f, b, e, v, n, t, s) {
+      if (f.fbq) return;
+      n = f.fbq = function () {
+        n.callMethod ? n.callMethod.apply(n, arguments) : n.queue.push(arguments);
+      };
+      if (!f._fbq) f._fbq = n;
+      n.push = n;
+      n.loaded = !0;
+      n.version = "2.0";
+      n.queue = [];
+      t = b.createElement(e);
+      t.async = !0;
+      t.src = v;
+      s = b.getElementsByTagName(e)[0];
+      s.parentNode.insertBefore(t, s);
+    })(window, document, "script", "https://connect.facebook.net/en_US/fbevents.js");
+    window.fbq("init", pixelId);
+    window.fbq("track", "PageView");
+  }, []);
+
+  function trackerInscription() {
+    if (window.fbq) window.fbq("track", "Lead");
+  }
+
+  const contenuParProfil = {
+    cod: {
+      badge: "🏍️ Vente en ligne — Shopify, WhatsApp, ou les deux",
+      titre: "Que tu vendes sur Shopify, WhatsApp, ou juste au téléphone — ton business COD mérite un vrai système",
+      sousTitre: "Boutique en ligne déjà en place, ou commandes prises à la main dans WhatsApp : chaque commande oubliée, c'est de l'argent qui t'échappe. RecuVente centralise tout, travaille pour toi en arrière-plan, et te dit chaque matin quoi faire.",
+      captureLignes: [
+        { label: "Argent récupéré", valeur: "1 240 500 FCFA", couleur: "#e8920a" },
+        { label: "En cours", valeur: "18", couleur: "white" },
+        { label: "Taux de livraison", valeur: "87%", couleur: "white" },
+      ],
+      avantages: [
+        { icon: "🔌", titre: "Déjà une boutique Shopify ? Connecte-la en 2 minutes", desc: "Tes commandes arrivent automatiquement dans RecuVente, sans rien taper à la main — tu gardes Shopify, tu ajoutes juste la puissance de gestion qui lui manque." },
+        { icon: "🛍️", titre: "Pas encore de boutique en ligne ? RecuVente en inclut une", desc: "Avis clients, collections, galerie photo, commande en un clic sans panier compliqué — prête à recevoir tes publicités Facebook, sans payer un abonnement Shopify en plus." },
+        { icon: "🧠", titre: "\"Ce matin chez vous\" — ton assistant intelligent", desc: "Chaque jour, un résumé clair de ce qui compte vraiment : commandes à risque, stock bas, client à relancer. Zéro analyse à faire toi-même." },
+        { icon: "📋", titre: "Chaque commande, du premier contact à la livraison", desc: "Statut en temps réel — en cours, confirmée, échouée — jamais un client qui se perd dans les échanges WhatsApp." },
+        { icon: "🚚", titre: "Tes livreurs, suivis en direct", desc: "Position GPS pendant leur tournée, commission calculée automatiquement, montant exact à déposer chaque jour." },
+        { icon: "🎧", titre: "Une équipe de closers, sans doublons", desc: "Chaque commande non assignée est prise par un seul closer à la fois — fini les deux personnes qui rappellent le même client." },
+        { icon: "💵", titre: "Le bénéfice réel de CHAQUE produit", desc: "Pas juste ton chiffre d'affaires global — sais enfin lequel de tes produits te rapporte vraiment de l'argent, et lequel te fait perdre du temps pour rien." },
+        { icon: "📊", titre: "La seule app pensée pour la pub Facebook en COD", desc: "Envoie le vrai signal \"Achat\" à Facebook uniquement quand la livraison est confirmée — pas juste quand quelqu'un commande. Tes publicités arrêtent enfin de te ramener des faux acheteurs." },
+        { icon: "🔄", titre: "Le réachat, sans y penser", desc: "L'app détecte le rythme d'achat de chaque client et te dit qui relancer, et quand." },
+      ],
+    },
+    retail: {
+      badge: "🏪 Boutique / Commerce physique",
+      titre: "Ta boutique mérite mieux qu'un cahier qu'on remplit à moitié",
+      sousTitre: "Chaque vente non notée, chaque acompte oublié, c'est de l'argent que tu perds de vue. RecuVente organise ta boutique comme une vraie entreprise structurée — et te fait gagner du temps chaque jour, pas juste enregistrer ton travail.",
+      captureLignes: [
+        { label: "Ventes du jour", valeur: "340 000 FCFA", couleur: "#e8920a" },
+        { label: "Acomptes en attente", valeur: "5", couleur: "white" },
+        { label: "Produits en stock", valeur: "142", couleur: "white" },
+      ],
+      avantages: [
+        { icon: "🧠", titre: "\"Ce matin chez vous\" — ton assistant intelligent", desc: "Chaque jour, un résumé clair de ce qui compte : ventes à risque, stock bas, meilleur produit. Zéro analyse à faire toi-même." },
+        { icon: "🏪", titre: "Vente sur place, livraison, ou expédition", desc: "Choisis comment le produit sort du magasin — payé en entier sur place, remis à un livreur, ou expédié hors de ta ville." },
+        { icon: "💰", titre: "L'acompte, suivi jusqu'au dernier franc", desc: "Un client paie en plusieurs fois avant de retirer ? Le solde restant s'affiche clairement, jusqu'à ce qu'il soit réglé." },
+        { icon: "💵", titre: "Le bénéfice réel de CHAQUE produit", desc: "Sais enfin lequel de tes produits te rapporte vraiment, pas juste ton chiffre d'affaires total." },
+        { icon: "📦", titre: "Le stock, produit par produit", desc: "Sais exactement ce qu'il te reste, ce qui est déjà vendu, ce qui va bientôt manquer." },
+        { icon: "🛍️", titre: "Une vraie boutique en ligne, incluse", desc: "Avis clients, collections, galerie photo — vends aussi en ligne sans changer d'outil." },
+        { icon: "🧾", titre: "Une facture professionnelle, en un clic", desc: "PDF prêt à envoyer, avec le détail exact de l'acompte et du solde restant si besoin." },
+        { icon: "📊", titre: "Toute ton équipe, un seul endroit", desc: "Vendeurs, comptable, chacun son rôle et son accès — plus de confusion sur qui a fait quoi." },
+      ],
+    },
+  };
+
+  const c = contenuParProfil[profil];
+
+  const differenciateurs = [
+    { icon: "🧠", titre: "Un assistant, pas juste un tableau", desc: "La plupart des outils affichent des chiffres. RecuVente te dit quoi faire avec, chaque matin." },
+    { icon: "📊", titre: "Le seul adapté à la pub Facebook en COD", desc: "Aucun autre outil sur ce marché n'envoie le vrai signal d'achat à Facebook uniquement à la livraison confirmée." },
+    { icon: "💵", titre: "Le bénéfice réel, produit par produit", desc: "Pas juste \"combien j'ai vendu\" — \"combien chaque produit me rapporte vraiment\", après tous les coûts." },
+    { icon: "🛍️", titre: "Boutique + gestion, un seul outil", desc: "Pas besoin de Shopify + un tableau Excel + WhatsApp. Tout est déjà connecté ensemble." },
+  ];
+
+  const faq = [
+    { q: "Comment fonctionne l'essai gratuit ?", r: "7 jours d'accès complet dès l'inscription, sur le plan Pro. Aucune carte bancaire requise. Tu peux annuler ou continuer à tout moment." },
+    { q: "Comment se fait le paiement ?", r: "En ligne, directement dans l'app, activé automatiquement dès la confirmation du paiement." },
+    { q: "Mes données sont-elles visibles par d'autres entreprises ?", r: "Non, jamais. Chaque entreprise a son espace complètement isolé et sécurisé — personne d'autre ne peut voir tes commandes, clients ou finances." },
+    { q: "Puis-je changer de plan plus tard ?", r: "Oui, à tout moment, selon la croissance de ton activité." },
+    { q: "RecuVente fonctionne pour quel type de commerce ?", r: "Deux profils au choix dès l'inscription : la vente en ligne avec paiement à la livraison (COD), ou la boutique physique avec vente sur place et acompte. Choisis celui qui te correspond." },
+    { q: "Puis-je connecter ma boutique Shopify ?", r: "Oui — une intégration directe permet à tes commandes Shopify d'arriver automatiquement dans RecuVente, sans rien taper à la main." },
+    { q: "Est-ce que je peux vraiment vendre en ligne sans Shopify ?", r: "Oui — RecuVente inclut une vraie boutique publique (photos, avis clients, collections), prête à recevoir tes publicités Facebook, sans autre abonnement." },
+  ];
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#FAFAF7", fontFamily: "'IBM Plex Sans', sans-serif", color: "#16231F", overflowX: "hidden" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700;9..144,900&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
+        .rv-lp-toggle-btn { transition: all 0.25s ease; }
+        .rv-lp-fade { animation: rvLpFadeIn 0.4s ease; }
+        @keyframes rvLpFadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        .rv-lp-card:hover { transform: translateY(-4px); box-shadow: 0 20px 40px rgba(15,27,22,0.14); border-color: rgba(26,122,60,0.25) !important; }
+        .rv-lp-card { transition: all 0.25s cubic-bezier(0.2,0.8,0.2,1); box-shadow: 0 2px 10px rgba(15,27,22,0.05); }
+        .rv-lp-hero-grid { display: grid; grid-template-columns: 1fr; gap: 8px; align-items: center; }
+        .rv-lp-hero-mockup-wrap { display: flex; justify-content: center; margin: 8px 0 12px; }
+        .rv-lp-connector-line { display: none; }
+        @keyframes rvLpFloat { 0%, 100% { transform: rotate(3deg) translateY(0px); } 50% { transform: rotate(3deg) translateY(-14px); } }
+        @media (min-width: 880px) {
+          .rv-lp-hero-grid { grid-template-columns: 1.1fr 0.9fr; gap: 40px; text-align: left !important; }
+          .rv-lp-hero-text { text-align: left !important; }
+          .rv-lp-hero-mockup-wrap { margin: 0; }
+          .rv-lp-connector-line { display: block; }
+        }
+        .rv-lp-mockup { animation: rvLpFloat 5.5s ease-in-out infinite; }
+      `}</style>
+
+      <div style={{ background: "radial-gradient(ellipse 900px 600px at 15% -10%, #2a5a3f 0%, transparent 60%), radial-gradient(ellipse 700px 500px at 100% 20%, rgba(232,146,10,0.18) 0%, transparent 55%), linear-gradient(170deg, #0F1B16 0%, #16231F 55%, #1a7a3c 160%)", color: "white", padding: "44px 24px 0", position: "relative", overflow: "hidden" }}>
+        <div style={{ maxWidth: 1080, margin: "0 auto", position: "relative", zIndex: 1 }}>
+          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 20, marginBottom: 32, letterSpacing: "0.02em", textAlign: "center" }}>
+            RECU<span style={{ color: "#e8920a" }}>VENTE</span>
+          </div>
+
+          <div className="rv-lp-hero-grid">
+            <div className="rv-lp-hero-text" style={{ textAlign: "center", paddingBottom: 40 }}>
+              <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                Quel est ton profil ?
+              </div>
+              <div style={{ display: "inline-flex", background: "rgba(255,255,255,0.1)", borderRadius: 999, padding: 4, marginBottom: 20 }}>
+                <button
+                  className="rv-lp-toggle-btn"
+                  onClick={() => setProfil("cod")}
+                  style={{ padding: "10px 20px", borderRadius: 999, border: "none", background: profil === "cod" ? "white" : "transparent", color: profil === "cod" ? "#16231F" : "white", fontWeight: 700, fontSize: 13, cursor: "pointer" }}
+                >
+                  🏍️ Vente en ligne (Shopify, WhatsApp...)
+                </button>
+                <button
+                  className="rv-lp-toggle-btn"
+                  onClick={() => setProfil("retail")}
+                  style={{ padding: "10px 20px", borderRadius: 999, border: "none", background: profil === "retail" ? "white" : "transparent", color: profil === "retail" ? "#16231F" : "white", fontWeight: 700, fontSize: 13, cursor: "pointer" }}
+                >
+                  🏪 J'ai un magasin physique
+                </button>
+              </div>
+              <div style={{ fontSize: 11.5, opacity: 0.6, marginBottom: 24 }}>
+                Quel que soit ton choix, tu peux combiner boutique en ligne et vente physique — RecuVente s'adapte.
+              </div>
+
+              <div key={profil} className="rv-lp-fade">
+                <div style={{ fontSize: 12.5, fontWeight: 500, opacity: 0.65, marginBottom: 12, letterSpacing: "0.01em" }}>
+                  Le logiciel qui gère tes commandes, tes livreurs et ta comptabilité — du premier contact jusqu'au paiement.
+                </div>
+                <div style={{ display: "inline-block", fontSize: 11.5, fontWeight: 600, color: "#e8920a", background: "rgba(232,146,10,0.15)", padding: "5px 14px", borderRadius: 999, marginBottom: 18 }}>
+                  {c.badge}
+                </div>
+                <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: "clamp(30px, 5vw, 44px)", lineHeight: 1.12, marginBottom: 16, letterSpacing: "-0.01em" }}>
+                  {c.titre}
+                </div>
+                <div style={{ fontSize: 15.5, opacity: 0.85, maxWidth: 460, margin: "0 auto 30px", lineHeight: 1.55 }}>
+                  {c.sousTitre}
+                </div>
+              </div>
+
+              <a href="?auth=1" onClick={trackerInscription} style={{ display: "inline-block", background: "#e8920a", color: "#16231F", padding: "16px 38px", borderRadius: 12, fontWeight: 700, fontSize: 15, textDecoration: "none", boxShadow: "0 14px 34px rgba(232,146,10,0.4)" }}>
+                Je démarre maintenant, gratuitement
+              </a>
+              <div style={{ fontSize: 12, opacity: 0.65, marginTop: 12 }}>7 jours d'accès complet · Sans carte bancaire · Actif en moins de 2 minutes</div>
+            </div>
+
+            <div className="rv-lp-hero-mockup-wrap">
+              <div key={profil + "-mockup"} className="rv-lp-fade rv-lp-mockup" style={{ width: "min(280px, 78vw)", background: "#0F1B16", borderRadius: 26, padding: 10, boxShadow: "0 40px 80px -20px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.08)" }}>
+                <div style={{ background: "#16231F", borderRadius: 18, padding: "16px 14px", border: "1px solid rgba(255,255,255,0.06)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                    <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 12.5, color: "white" }}>RECU<span style={{ color: "#e8920a" }}>VENTE</span></div>
+                    <div style={{ width: 22, height: 22, borderRadius: "50%", background: "rgba(255,255,255,0.1)" }} />
+                  </div>
+
+                  <div style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: "10px 12px", marginBottom: 10 }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: "white", marginBottom: 8 }}>🧠 Ce matin chez vous</div>
+                    <div style={{ fontSize: 9, color: "#f0a0a0", fontWeight: 600, marginBottom: 5 }}>⚠️ 3 commandes à risque</div>
+                    <div style={{ fontSize: 9, color: "#7fd6a3", fontWeight: 600 }}>💰 Bénéfice réel : {c.captureLignes[0].valeur}</div>
+                  </div>
+
+                  <div style={{ background: "white", borderRadius: 12, padding: "11px 12px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                      <div style={{ fontWeight: 700, fontSize: 10.5, color: "#16231F" }}>Aminata K.</div>
+                      <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 10.5, color: "#1a7a3c" }}>15 000</div>
+                    </div>
+                    <div style={{ display: "flex", gap: 5 }}>
+                      <div style={{ flex: 1, background: "#1F9D6E", color: "white", borderRadius: 6, padding: "5px 0", textAlign: "center", fontSize: 8.5, fontWeight: 700 }}>✅ Confirmer</div>
+                      <div style={{ flex: 1, background: "#F0EEE6", color: "#8A9089", borderRadius: 6, padding: "5px 0", textAlign: "center", fontSize: 8.5, fontWeight: 700 }}>❌ Échoué</div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+                    {c.captureLignes.slice(1).map((l, i) => (
+                      <div key={i} style={{ flex: 1, background: "rgba(255,255,255,0.05)", borderRadius: 8, padding: "8px 8px" }}>
+                        <div style={{ fontSize: 8, opacity: 0.6, color: "white", marginBottom: 2 }}>{l.label}</div>
+                        <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 11, color: l.couleur }}>{l.valeur}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ maxWidth: 780, margin: "-28px auto 0", padding: "0 24px 50px", position: "relative", zIndex: 2 }}>
+        <div style={{ background: "white", borderRadius: 22, padding: "40px 32px", boxShadow: "0 30px 60px -25px rgba(15,27,22,0.25)", textAlign: "center" }}>
+          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: "clamp(21px, 3vw, 25px)", marginBottom: 10, letterSpacing: "-0.005em" }}>
+            Chaque jour sans système, tu perds de l'argent — pas dans 6 mois, aujourd'hui
+          </div>
+          <div style={{ fontSize: 13.5, color: "#6B7168", marginBottom: 30, maxWidth: 480, margin: "0 auto 30px" }}>
+            Une commande oubliée, un acompte non suivi, un livreur qu'on ne peut pas contrôler — ce n'est pas un détail. C'est de l'argent qui t'échappe, chaque jour, sans que tu le voies.
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 16, textAlign: "left" }}>
+            {[
+              "Des commandes perdues quelque part dans WhatsApp",
+              "Un cahier ou un Excel qu'on ne remplit plus à jour",
+              "Impossible de savoir combien un livreur doit vraiment déposer",
+              "Aucune idée du vrai bénéfice à la fin du mois",
+            ].map((point, i) => (
+              <div key={i} style={{ display: "flex", gap: 12, alignItems: "flex-start", fontSize: 13.5, color: "#3a3f3c", background: "#FBEAE6", borderRadius: 12, padding: "12px 14px" }}>
+                <span style={{ color: "#D64933", flexShrink: 0, fontWeight: 700, fontSize: 15 }}>✕</span>
+                {point}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {statsPlateforme && Number(statsPlateforme.nb_commandes_confirmees) > 0 && (
+        <div style={{ maxWidth: 780, margin: "0 auto", padding: "0 24px 44px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 14, textAlign: "center" }}>
+            <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 14, padding: "16px 12px" }}>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 22, color: "#1a7a3c" }}>
+                {Number(statsPlateforme.nb_commandes_confirmees).toLocaleString("fr-FR")}
+              </div>
+              <div style={{ fontSize: 11.5, color: "#6B7168", marginTop: 4 }}>commandes livrées via RecuVente</div>
+            </div>
+            <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 14, padding: "16px 12px" }}>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 22, color: "#e8920a" }}>
+                {Number(statsPlateforme.montant_total_confirme).toLocaleString("fr-FR")}
+              </div>
+              <div style={{ fontSize: 11.5, color: "#6B7168", marginTop: 4 }}>FCFA récupérés pour nos clients</div>
+            </div>
+            <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 14, padding: "16px 12px" }}>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 22, color: "#16231F" }}>
+                {Number(statsPlateforme.nb_entreprises_actives).toLocaleString("fr-FR")}
+              </div>
+              <div style={{ fontSize: 11.5, color: "#6B7168", marginTop: 4 }}>entreprises utilisent déjà RecuVente</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={{ maxWidth: 800, margin: "0 auto", padding: "10px 24px 40px" }}>
+        <div style={{ textAlign: "center", marginBottom: 32 }}>
+          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 26 }}>
+            Comment ça marche
+          </div>
+          <div style={{ fontSize: 13.5, color: "#6B7168", marginTop: 8 }}>3 étapes, moins de 2 minutes</div>
+        </div>
+        <div style={{ position: "relative" }}>
+          <div style={{ position: "absolute", top: 23, left: "16%", right: "16%", height: 2, background: "repeating-linear-gradient(90deg, #DDD8CC 0, #DDD8CC 6px, transparent 6px, transparent 12px)", zIndex: 0 }} className="rv-lp-connector-line" />
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 20, position: "relative", zIndex: 1 }}>
+            {[
+              { num: "1", titre: "Crée ton espace", desc: "Nom de ton entreprise, ton profil (vente en ligne ou boutique), ton numéro WhatsApp. C'est tout." },
+              { num: "2", titre: "Ajoute ta première commande", desc: "Manuellement, ou connecte Shopify pour que tout arrive automatiquement, sans rien taper." },
+              { num: "3", titre: "Laisse RecuVente travailler", desc: "Suivi, relances, comptabilité, boutique en ligne — tout se met à jour seul, chaque jour." },
+            ].map((etape, i) => (
+              <div key={i} style={{ textAlign: "center" }}>
+                <div style={{ width: 46, height: 46, borderRadius: "50%", background: "#1a7a3c", color: "white", fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px", boxShadow: "0 8px 18px rgba(26,122,60,0.3)" }}>
+                  {etape.num}
+                </div>
+                <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>{etape.titre}</div>
+                <div style={{ fontSize: 13, color: "#6B7168", lineHeight: 1.55 }}>{etape.desc}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div key={profil + "-avantages"} className="rv-lp-fade" style={{ background: "linear-gradient(180deg, #F0EEE3 0%, #FAFAF7 100%)", padding: "48px 24px" }}>
+        <div style={{ maxWidth: 960, margin: "0 auto" }}>
+          <div style={{ textAlign: "center", marginBottom: 36 }}>
+            <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: "clamp(24px, 3.2vw, 30px)" }}>
+              Tout ce dont {profil === "cod" ? "ta vente en ligne" : "ta boutique"} a besoin
+            </div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 18 }}>
+            {c.avantages.map((f, i) => (
+              <div key={i} className="rv-lp-card" style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 16, padding: 24 }}>
+                <div style={{ width: 46, height: 46, borderRadius: 12, background: "#EAF3DE", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, marginBottom: 14 }}>{f.icon}</div>
+                <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>{f.titre}</div>
+                <div style={{ fontSize: 13, color: "#6B7168", lineHeight: 1.55 }}>{f.desc}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ background: "white", borderTop: "1px solid #ECE8DC", borderBottom: "1px solid #ECE8DC", padding: "36px 24px" }}>
+        <div style={{ maxWidth: 700, margin: "0 auto", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 20, textAlign: "center" }}>
+          {[
+            { icon: "🔒", txt: "Tes données, isolées et privées" },
+            { icon: "⚡", txt: "Activation immédiate du paiement" },
+            { icon: "📱", txt: "Fonctionne sur mobile comme sur ordinateur" },
+          ].map((item, i) => (
+            <div key={i}>
+              <div style={{ width: 44, height: 44, borderRadius: "50%", background: "#FAFAF7", border: "1px solid #ECE8DC", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, margin: "0 auto 8px" }}>{item.icon}</div>
+              <div style={{ fontSize: 12.5, color: "#6B7168", fontWeight: 500 }}>{item.txt}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ maxWidth: 700, margin: "0 auto", padding: "10px 24px 40px" }}>
+        <div style={{ textAlign: "center", marginBottom: 28 }}>
+          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 22 }}>
+            "Oui, mais..."
+          </div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {[
+            { objection: "\"Je ne suis pas doué avec la technologie\"", reponse: "Si tu sais utiliser WhatsApp, tu sais utiliser RecuVente. Pensé pour être compris en quelques minutes, sans formation." },
+            { objection: "\"Je n'ai pas le temps d'apprendre un nouvel outil\"", reponse: "C'est justement le temps que tu perds à chercher une commande dans WhatsApp que RecuVente te redonne." },
+            { objection: "\"Ça doit être compliqué à mettre en place\"", reponse: "Créer ton espace prend moins de 2 minutes. Ta première commande peut être ajoutée tout de suite après." },
+          ].map((item, i) => (
+            <div key={i} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "16px 18px" }}>
+              <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 5, color: "#16231F" }}>{item.objection}</div>
+              <div style={{ fontSize: 13, color: "#6B7168", lineHeight: 1.5 }}>{item.reponse}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ maxWidth: 720, margin: "0 auto", padding: "10px 24px 50px" }}>
+        <div style={{ textAlign: "center", marginBottom: 30 }}>
+          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: "clamp(22px, 3vw, 27px)" }}>
+            Ce que tu utilises aujourd'hui, face à RecuVente
+          </div>
+        </div>
+        <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 18, overflow: "hidden", boxShadow: "0 20px 40px -20px rgba(15,27,22,0.15)" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr" }}>
+            <div style={{ padding: "14px 16px", fontSize: 11.5, fontWeight: 700, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em" }} />
+            <div style={{ padding: "14px 10px", fontSize: 12.5, fontWeight: 700, color: "#8A9089", textAlign: "center" }}>WhatsApp + Excel</div>
+            <div style={{ padding: "14px 10px", fontSize: 12.5, fontWeight: 700, color: "white", textAlign: "center", background: "#1a7a3c" }}>RecuVente</div>
+          </div>
+          {[
+            { critere: "Retrouver une commande précise", avant: "Faire défiler des dizaines de messages", apres: "Recherchée en 1 seconde" },
+            { critere: "Savoir ce qu'un livreur doit déposer", avant: "Calcul manuel, souvent oublié", apres: "Calculé automatiquement" },
+            { critere: "Bénéfice réel par produit", avant: "Quasi impossible à suivre", apres: "Visible en un coup d'œil" },
+            { critere: "Relancer un client au bon moment", avant: "Ça dépend si on y pense", apres: "L'app te le rappelle chaque jour" },
+            { critere: "Boutique en ligne pour la pub Facebook", avant: "Un autre outil à payer et connecter", apres: "Déjà incluse" },
+            { critere: "Toute l'équipe sur les mêmes infos", avant: "Chacun son cahier, sa mémoire", apres: "Un seul endroit, à jour en temps réel" },
+          ].map((ligne, i) => (
+            <div key={i} style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr", borderTop: "1px solid #ECE8DC" }}>
+              <div style={{ padding: "13px 16px", fontSize: 12.5, fontWeight: 600, color: "#16231F", display: "flex", alignItems: "center" }}>{ligne.critere}</div>
+              <div style={{ padding: "13px 10px", fontSize: 12, color: "#8A9089", textAlign: "center", display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
+                <span style={{ color: "#D64933" }}>✕</span> {ligne.avant}
+              </div>
+              <div style={{ padding: "13px 10px", fontSize: 12, color: "#16231F", textAlign: "center", background: "#EAF3DE", display: "flex", alignItems: "center", justifyContent: "center", gap: 5, fontWeight: 600 }}>
+                <span style={{ color: "#1a7a3c" }}>✓</span> {ligne.apres}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {plans.length > 0 && (
+        <div style={{ background: "#FAFAF7", padding: "54px 24px" }}>
+          <div style={{ textAlign: "center", marginBottom: 40 }}>
+            <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: "clamp(24px, 3.2vw, 30px)" }}>Choisis ton plan, commence en 2 minutes</div>
+            <div style={{ fontSize: 14, color: "#6B7168", marginTop: 8 }}>7 jours gratuits sur n'importe quel plan. Tu ne payes que si RecuVente te convainc.</div>
+          </div>
+          <div style={{ maxWidth: 900, margin: "0 auto", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 18 }}>
+            {plans.map((p, i) => (
+              <div
+                key={p.id}
+                className="rv-lp-card"
+                style={{
+                  border: i === 1 ? "2px solid #1a7a3c" : "1px solid #ECE8DC",
+                  borderRadius: 18, padding: i === 1 ? "30px 24px" : 24,
+                  position: "relative", background: "white",
+                  boxShadow: i === 1 ? "0 24px 48px -16px rgba(26,122,60,0.35)" : undefined,
+                  transform: i === 1 ? "translateY(-6px)" : undefined,
+                }}
+              >
+                {i === 1 && (
+                  <div style={{ position: "absolute", top: -12, left: "50%", transform: "translateX(-50%)", background: "#1a7a3c", color: "white", fontSize: 10.5, fontWeight: 700, padding: "4px 14px", borderRadius: 999, boxShadow: "0 4px 12px rgba(26,122,60,0.4)" }}>
+                    LE PLUS CHOISI
+                  </div>
+                )}
+                <div style={{ fontWeight: 700, fontSize: 16, marginTop: i === 1 ? 6 : 0 }}>{p.nom}</div>
+                <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: i === 1 ? 30 : 24, marginTop: 8, color: "#1a7a3c" }}>
+                  {Number(p.prix).toLocaleString("fr-FR")} <span style={{ fontSize: 12, fontWeight: 500, color: "#8A9089" }}>{p.devise}/mois</span>
+                </div>
+                <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 12, lineHeight: 1.7 }}>
+                  {p.max_commandes_mois ? `${p.max_commandes_mois} commandes/mois` : "Commandes illimitées"}<br />
+                  {p.max_membres ? `${p.max_membres} membres max` : "Membres illimités"}
+                </div>
+                <a href="?auth=1" onClick={trackerInscription} style={{ display: "block", textAlign: "center", marginTop: 18, background: i === 1 ? "#1a7a3c" : "white", color: i === 1 ? "white" : "#1a7a3c", border: i === 1 ? "none" : "1px solid #1a7a3c", padding: "11px 0", borderRadius: 9, fontWeight: 700, fontSize: 13, textDecoration: "none" }}>
+                  Commencer
+                </a>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div style={{ maxWidth: 640, margin: "0 auto", padding: "50px 24px" }}>
+        <div style={{ textAlign: "center", marginBottom: 32 }}>
+          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 26 }}>Questions fréquentes</div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {faq.map((f, i) => (
+            <div key={i} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, overflow: "hidden" }}>
+              <button
+                onClick={() => setFaqOuverte(faqOuverte === i ? null : i)}
+                style={{ width: "100%", textAlign: "left", background: "none", border: "none", padding: "16px 18px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}
+              >
+                <span style={{ fontWeight: 600, fontSize: 14.5 }}>{f.q}</span>
+                <span style={{ color: "#1a7a3c", fontSize: 16, flexShrink: 0, marginLeft: 10 }}>{faqOuverte === i ? "−" : "+"}</span>
+              </button>
+              {faqOuverte === i && (
+                <div style={{ padding: "0 18px 16px", fontSize: 13.5, color: "#6B7168", lineHeight: 1.6 }}>{f.r}</div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ background: "radial-gradient(ellipse 800px 500px at 85% 0%, rgba(232,146,10,0.15) 0%, transparent 55%), linear-gradient(170deg, #0F1B16 0%, #16231F 60%, #1a7a3c 200%)", color: "white", padding: "64px 24px", textAlign: "center" }}>
+        <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: "clamp(24px, 3.5vw, 32px)", marginBottom: 12, letterSpacing: "-0.01em" }}>
+          {profil === "cod" ? "Ta prochaine commande mérite d'être suivie correctement" : "Ta boutique mérite mieux qu'un cahier"}
+        </div>
+        <div style={{ fontSize: 14.5, opacity: 0.8, marginBottom: 28, maxWidth: 420, margin: "0 auto 28px" }}>
+          Chaque jour que tu attends, c'est une commande de plus qui risque de se perdre. Commence maintenant — c'est gratuit, et ça prend 2 minutes.
+        </div>
+        <a href="?auth=1" onClick={trackerInscription} style={{ display: "inline-block", background: "#e8920a", color: "#16231F", padding: "16px 40px", borderRadius: 12, fontWeight: 700, fontSize: 15, textDecoration: "none", boxShadow: "0 14px 34px rgba(232,146,10,0.4)" }}>
+          Créer mon espace gratuitement
+        </a>
+        <div style={{ fontSize: 11.5, opacity: 0.55, marginTop: 14 }}>Aucune carte bancaire · Annule à tout moment</div>
+      </div>
+
+      <div style={{ textAlign: "center", padding: "20px 24px", fontSize: 12, color: "#8A9089" }}>
+        RecuVente — {new Date().getFullYear()}
+        <div style={{ marginTop: 8, display: "flex", gap: 16, justifyContent: "center" }}>
+          <a href="?page=cgu" style={{ color: "#8A9089", textDecoration: "underline" }}>Conditions d'utilisation</a>
+          <a href="?page=confidentialite" style={{ color: "#8A9089", textDecoration: "underline" }}>Confidentialité</a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PageLegale({ page }) {
+  const contenu = {
+    cgu: {
+      titre: "Conditions Générales d'Utilisation",
+      texte: `Dernière mise à jour : ${new Date().toLocaleDateString("fr-FR")}
+
+1. OBJET
+RecuVente est une plateforme logicielle permettant aux entreprises de gestion de commandes en paiement à la livraison (COD) de gérer leurs commandes, équipes, livraisons et comptabilité.
+
+2. INSCRIPTION ET ESSAI GRATUIT
+Toute entreprise peut créer un espace et bénéficier d'un essai gratuit de 7 jours. Aucune carte bancaire n'est requise pour l'essai. À l'issue de l'essai, l'accès aux fonctionnalités de création de commandes est suspendu jusqu'à activation d'un abonnement payant, sans suppression des données existantes.
+
+3. ABONNEMENTS ET PAIEMENT
+Les tarifs des différents plans sont affichés sur la page d'accueil. Le paiement s'effectue par Mobile Money. L'activation du plan payant intervient après confirmation manuelle de la réception du paiement par l'équipe RecuVente.
+
+4. DONNÉES DE L'ENTREPRISE CLIENTE
+Chaque entreprise reste propriétaire de ses données (commandes, clients, équipe, finances). RecuVente s'engage à ne jamais partager ces données avec une autre entreprise cliente de la plateforme.
+
+5. RÉSILIATION
+Une entreprise peut cesser d'utiliser le service à tout moment. Les données restent accessibles en lecture pendant une période raisonnable après la fin de l'abonnement, sauf demande explicite de suppression.
+
+6. RESPONSABILITÉ
+RecuVente met à disposition un outil de gestion. La responsabilité de l'exactitude des données saisies (commandes, montants, coûts) incombe à l'entreprise cliente. RecuVente ne saurait être tenu responsable des pertes commerciales liées à une mauvaise utilisation de l'outil.
+
+7. MODIFICATION DES CONDITIONS
+Ces conditions peuvent être amenées à évoluer. Les entreprises clientes seront informées de tout changement significatif.
+
+⚠️ Ce document est un modèle de départ, non validé par un juriste. Avant tout lancement commercial réel, une relecture par un professionnel du droit ivoirien (ou de la juridiction concernée) est fortement recommandée.`,
+    },
+    confidentialite: {
+      titre: "Politique de confidentialité",
+      texte: `Dernière mise à jour : ${new Date().toLocaleDateString("fr-FR")}
+
+1. DONNÉES COLLECTÉES
+RecuVente collecte : l'email et le mot de passe de connexion, le nom de l'entreprise, les données de commandes (clients, produits, montants), et les informations d'équipe (livreurs, closers, comptables) que vous saisissez volontairement.
+
+2. UTILISATION DES DONNÉES
+Ces données sont utilisées exclusivement pour faire fonctionner votre espace de gestion — jamais revendues, jamais partagées avec d'autres entreprises clientes de la plateforme, jamais utilisées à des fins publicitaires tierces.
+
+3. ISOLATION ENTRE ENTREPRISES
+Chaque entreprise cliente dispose d'un espace strictement isolé au niveau technique (base de données). Aucune entreprise ne peut accéder aux données d'une autre, même par erreur.
+
+4. HÉBERGEMENT
+Les données sont hébergées via Supabase (infrastructure cloud sécurisée) et Vercel.
+
+5. VOS DROITS
+Vous pouvez demander l'export ou la suppression complète de vos données à tout moment en contactant l'équipe RecuVente.
+
+6. NOTIFICATIONS
+Avec votre autorisation explicite, RecuVente peut vous envoyer des notifications sonores dans l'application lors de l'arrivée de nouvelles commandes.
+
+⚠️ Ce document est un modèle de départ, non validé par un juriste. Avant tout lancement commercial réel, une relecture par un professionnel du droit est fortement recommandée.`,
+    },
+  };
+
+  const c = contenu[page] || contenu.cgu;
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#FAFAF7", fontFamily: "'IBM Plex Sans', sans-serif", padding: "40px 20px" }}>
+      <div style={{ maxWidth: 640, margin: "0 auto" }}>
+        <a href="?" style={{ fontSize: 13, color: "#1a7a3c", textDecoration: "underline" }}>← Retour à l'accueil</a>
+        <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 26, marginTop: 16, marginBottom: 20 }}>{c.titre}</div>
+        <div style={{ whiteSpace: "pre-wrap", fontSize: 13.5, lineHeight: 1.7, color: "#16231F", background: "white", border: "1px solid #ECE8DC", borderRadius: 14, padding: 24 }}>
+          {c.texte}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AuthScreen({ modeInitial }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [mode, setMode] = useState(modeInitial || "signup");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [resetEnvoye, setResetEnvoye] = useState(false);
+  const [confirmationRequise, setConfirmationRequise] = useState(false);
+
+  async function submit() {
+    setError("");
+    setLoading(true);
+    if (mode === "signup") {
+      const { data, error } = await supabase.auth.signUp({ email, password });
+      if (error) setError(error.message);
+      else if (data.user && !data.session) setConfirmationRequise(true);
+    } else if (mode === "reset") {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin + "?resetpw=1",
+      });
+      if (error) setError(error.message);
+      else setResetEnvoye(true);
+    } else {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) setError(error.message);
+    }
+    setLoading(false);
+  }
+
+  return (
+    <Centered>
+      <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 16, padding: 30, width: 340 }}>
+        <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 22, marginBottom: 4 }}>RecuVente <span style={{ color: "#e8920a" }}>SaaS</span></div>
+        <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 20 }}>
+          {mode === "signup" ? "Crée ton compte et ton espace" : mode === "reset" ? "Réinitialiser ton mot de passe" : "Connexion"}
+        </div>
+
+        {mode === "reset" && resetEnvoye ? (
+          <div style={{ background: "#EAF3DE", border: "1px solid #C7DDA3", borderRadius: 10, padding: "14px 12px", fontSize: 13, color: "#3B6D11", marginBottom: 14 }}>
+            ✅ Un lien de réinitialisation a été envoyé à <strong>{email}</strong>. Vérifie ta boîte mail (et les spams).
+          </div>
+        ) : mode === "signup" && confirmationRequise ? (
+          <div style={{ background: "#EAF3DE", border: "1px solid #C7DDA3", borderRadius: 10, padding: "14px 12px", fontSize: 13, color: "#3B6D11", marginBottom: 14 }}>
+            ✅ Compte créé ! Un email de confirmation a été envoyé à <strong>{email}</strong>. Clique sur le lien reçu pour activer ton compte, puis reviens te connecter.
+          </div>
+        ) : (
+          <>
+            <input placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} style={inputStyle} />
+            {mode !== "reset" && (
+              <input placeholder="Mot de passe" type="password" value={password} onChange={(e) => setPassword(e.target.value)} style={inputStyle} />
+            )}
+            {error && <div style={{ color: "#D64933", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
+            <button onClick={submit} disabled={loading} style={btnStyle}>
+              {loading ? "..." : mode === "signup" ? "Créer mon compte" : mode === "reset" ? "Envoyer le lien" : "Se connecter"}
+            </button>
+          </>
+        )}
+
+        {mode !== "reset" && (
+          <div style={{ textAlign: "center", marginTop: 14, fontSize: 12.5, color: "#6B7168", cursor: "pointer" }} onClick={() => setMode(mode === "signup" ? "login" : "signup")}>
+            {mode === "signup" ? "Déjà un compte ? Se connecter" : "Pas de compte ? S'inscrire"}
+          </div>
+        )}
+        {mode === "login" && (
+          <div style={{ textAlign: "center", marginTop: 8, fontSize: 12, color: "#8A9089", cursor: "pointer", textDecoration: "underline" }} onClick={() => { setMode("reset"); setError(""); setResetEnvoye(false); }}>
+            Mot de passe oublié ?
+          </div>
+        )}
+        {mode === "reset" && (
+          <div style={{ textAlign: "center", marginTop: 8, fontSize: 12.5, color: "#6B7168", cursor: "pointer", textDecoration: "underline" }} onClick={() => { setMode("login"); setError(""); setResetEnvoye(false); }}>
+            ← Retour à la connexion
+          </div>
+        )}
+        <a href="?" style={{ display: "block", textAlign: "center", marginTop: 10, fontSize: 12, color: "#8A9089" }}>← Retour à l'accueil</a>
+      </div>
+    </Centered>
+  );
+}
+
+function NouveauMotDePasseScreen() {
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [succes, setSucces] = useState(false);
+
+  async function submit() {
+    setError("");
+    if (password.length < 6) {
+      setError("Le mot de passe doit faire au moins 6 caractères.");
+      return;
+    }
+    if (password !== confirm) {
+      setError("Les mots de passe ne correspondent pas.");
+      return;
+    }
+    setLoading(true);
+    const { error } = await supabase.auth.updateUser({ password });
+    if (error) setError(error.message);
+    else setSucces(true);
+    setLoading(false);
+  }
+
+  if (succes) {
+    return (
+      <Centered>
+        <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 16, padding: 30, width: 340, textAlign: "center" }}>
+          <div style={{ fontSize: 32, marginBottom: 10 }}>✅</div>
+          <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 6 }}>Mot de passe mis à jour</div>
+          <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 18 }}>Tu peux maintenant te reconnecter.</div>
+          <a href="?auth=1" style={{ ...btnStyle, display: "block", textAlign: "center", textDecoration: "none", boxSizing: "border-box" }}>Se connecter</a>
+        </div>
+      </Centered>
+    );
+  }
+
+  return (
+    <Centered>
+      <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 16, padding: 30, width: 340 }}>
+        <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 18, marginBottom: 4 }}>Nouveau mot de passe</div>
+        <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 20 }}>Choisis un nouveau mot de passe pour ton compte.</div>
+        <input placeholder="Nouveau mot de passe" type="password" value={password} onChange={(e) => setPassword(e.target.value)} style={inputStyle} />
+        <input placeholder="Confirme le mot de passe" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} style={inputStyle} />
+        {error && <div style={{ color: "#D64933", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
+        <button onClick={submit} disabled={loading} style={btnStyle}>
+          {loading ? "..." : "Enregistrer"}
+        </button>
+      </div>
+    </Centered>
+  );
+}
+
+function CreateWorkspaceScreen({ onCreate, loading }) {
+  const [nom, setNom] = useState("");
+  const [activityType, setActivityType] = useState("cod_ecommerce");
+  const [whatsappNumber, setWhatsappNumber] = useState("");
+  const [etape, setEtape] = useState(1);
+
+  const types = [
+    { key: "cod_ecommerce", icon: "📦", titre: "Vente en ligne (paiement à la livraison)", desc: "Commandes, livreurs, closers, suivi de livraison" },
+    { key: "retail", icon: "🏪", titre: "Boutique / Commerce", desc: "Vente directe en magasin, avec suivi de stock" },
+  ];
+
+  return (
+    <Centered>
+      <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 16, padding: 30, width: 360 }}>
+        {etape === 1 ? (
+          <>
+            <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 20, marginBottom: 4 }}>Bienvenue 👋</div>
+            <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 18 }}>
+              Quel type d'activité gères-tu ?
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
+              {types.map((t) => (
+                <button
+                  key={t.key}
+                  onClick={() => setActivityType(t.key)}
+                  style={{
+                    textAlign: "left", padding: "14px 16px", borderRadius: 12,
+                    border: `2px solid ${activityType === t.key ? "#1a7a3c" : "#ECE8DC"}`,
+                    background: activityType === t.key ? "#EAF3DE" : "white", cursor: "pointer",
+                  }}
+                >
+                  <div style={{ fontSize: 20, marginBottom: 4 }}>{t.icon}</div>
+                  <div style={{ fontWeight: 700, fontSize: 13.5, color: "#16231F" }}>{t.titre}</div>
+                  <div style={{ fontSize: 11.5, color: "#6B7168", marginTop: 2 }}>{t.desc}</div>
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setEtape(2)} style={btnStyle}>
+              Continuer
+            </button>
+          </>
+        ) : (
+          <>
+            <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 20, marginBottom: 4 }}>Presque fini</div>
+            <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 20 }}>
+              Nomme ton entreprise pour créer ton espace privé.
+            </div>
+            <input placeholder="Ex: Azali Express" value={nom} onChange={(e) => setNom(e.target.value)} style={inputStyle} autoFocus />
+            <input placeholder="Ton numéro WhatsApp (ex: 0708090910)" value={whatsappNumber} onChange={(e) => setWhatsappNumber(e.target.value)} style={inputStyle} />
+            <div style={{ fontSize: 11, color: "#8A9089", marginTop: -6, marginBottom: 10 }}>
+              Pour qu'on puisse te contacter, et pour recevoir les commandes de ta future boutique en ligne.
+            </div>
+            <button onClick={() => nom.trim() && whatsappNumber.trim() && onCreate(nom.trim(), activityType, whatsappNumber.trim())} disabled={loading || !nom.trim() || !whatsappNumber.trim()} style={btnStyle}>
+              {loading ? "Création..." : "Créer mon espace"}
+            </button>
+            <button
+              onClick={() => setEtape(1)}
+              style={{ width: "100%", marginTop: 10, padding: "10px 0", borderRadius: 10, border: "1px solid #DDD8CC", background: "white", color: "#6B7168", fontWeight: 600, fontSize: 13, cursor: "pointer" }}
+            >
+              ← Retour
+            </button>
+          </>
+        )}
+        <button
+          onClick={() => supabase.auth.signOut()}
+          style={{ width: "100%", marginTop: 10, padding: "10px 0", borderRadius: 10, border: "none", background: "none", color: "#8A9089", fontWeight: 500, fontSize: 12, cursor: "pointer" }}
+        >
+          Déconnexion
+        </button>
+      </div>
+    </Centered>
+  );
+}
+
+function ResumeIntelligent({ todoAujourdhui, clientsARelancer, produitStockCritique, meilleurLivreur, beneficeReel, currency, onVoirAujourdhui }) {
+  const lignes = [];
+
+  if (todoAujourdhui.sansNouvelles.length > 0) {
+    const montant = todoAujourdhui.sansNouvelles.reduce((s, c) => s + Number(c.montant), 0);
+    lignes.push({
+      icone: "⚠️",
+      couleur: "#D64933",
+      texte: `${todoAujourdhui.sansNouvelles.length} commande${todoAujourdhui.sansNouvelles.length > 1 ? "s" : ""} sans nouvelles depuis 24h — ${montant.toLocaleString("fr-FR")} ${currency} à risque`,
+    });
+  }
+
+  if (clientsARelancer.length > 0) {
+    lignes.push({
+      icone: "🔄",
+      couleur: "#1a7a3c",
+      texte: `${clientsARelancer.length} client${clientsARelancer.length > 1 ? "s" : ""} en retard sur leur rythme de réachat habituel`,
+    });
+  }
+
+  if (produitStockCritique) {
+    lignes.push({
+      icone: "📦",
+      couleur: "#8A6412",
+      texte: `Le stock de "${produitStockCritique.nom}" descend à ${produitStockCritique.restant} pièce${produitStockCritique.restant > 1 ? "s" : ""}`,
+    });
+  }
+
+  if (meilleurLivreur && meilleurLivreur.total > 0) {
+    lignes.push({
+      icone: "🚀",
+      couleur: "#1F9D6E",
+      texte: `${meilleurLivreur.nom} reste ton livreur le plus fiable (${meilleurLivreur.taux}% de réussite)`,
+    });
+  }
+
+  if (typeof beneficeReel === "number") {
+    lignes.push({
+      icone: "💰",
+      couleur: "#16231F",
+      texte: `Bénéfice réel du mois : ${beneficeReel.toLocaleString("fr-FR")} ${currency}`,
+    });
+  }
+
+  if (lignes.length === 0) return null;
+
+  return (
+    <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 14, padding: "16px 18px", margin: "14px 20px 0" }}>
+      <div style={{ fontWeight: 700, fontSize: 13.5, marginBottom: 12, display: "flex", alignItems: "center", gap: 6 }}>
+        🧠 Ce matin chez vous
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+        {lignes.map((l, i) => (
+          <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12.5, color: l.couleur, fontWeight: 600, lineHeight: 1.4 }}>
+            <span style={{ flexShrink: 0 }}>{l.icone}</span>
+            <span>{l.texte}</span>
+          </div>
+        ))}
+      </div>
+      {todoAujourdhui.total > 0 && (
+        <button
+          onClick={onVoirAujourdhui}
+          style={{ marginTop: 14, width: "100%", background: "#1a7a3c", color: "white", border: "none", borderRadius: 9, padding: "9px 0", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}
+        >
+          👉 Voir les {todoAujourdhui.total} commandes à traiter
+        </button>
+      )}
+    </div>
+  );
+}
+
+function WorkspaceDashboard({ workspace, session, subscription }) {
+  const [commandes, setCommandes] = useState([]);
+  const [commandeItems, setCommandeItems] = useState([]);
+  const [livreurs, setLivreurs] = useState([]);
+  const [closers, setClosers] = useState([]);
+  const [produits, setProduits] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
+  const [celebration, setCelebration] = useState(null);
+  const [retourPaiement, setRetourPaiement] = useState(
+    typeof window !== "undefined" && new URLSearchParams(window.location.search).get("paiement") === "succes"
+  );
+
+  useEffect(() => {
+    if (retourPaiement && typeof window !== "undefined") {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [retourPaiement]);
 
   function playCelebrationSound() {
     try {
@@ -455,125 +1096,3934 @@ export default function App() {
       });
     } catch (e) {}
   }
-
-  function notifyNewOrder(order) {
-    playNotifSound();
-    showToast(`🔔 Nouvelle commande — ${order.client}`);
-    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-      try {
-        new Notification("Nouvelle commande RecuVente", {
-          body: `${order.client} — ${order.produit} (${formatFCFA(order.montant)})`,
-          icon: "/icon-192.png",
-        });
-      } catch (e) {}
-    }
-  }
-
-  async function loadOrders(isRetry) {
-    const { data, error } = await supabase
-      .from("commandes")
-      .select("*")
-      .order("created_at", { ascending: false });
-    if (error) {
-      if (!isRetry && (error.message || "").toLowerCase().includes("jwt")) {
-        const { data: refreshed } = await supabase.auth.refreshSession();
-        if (refreshed.session) return loadOrders(true);
-      }
-      setError(error.message);
-    } else {
-      const list = data || [];
-      if (knownOrderIds.current !== null) {
-        const nouvelles = list.filter((o) => !knownOrderIds.current.has(o.id));
-        nouvelles.forEach((o) => notifyNewOrder(o));
-      }
-      knownOrderIds.current = new Set(list.map((o) => o.id));
-      setOrders(list);
-      setError(null);
-    }
-    setOrdersLoaded(true);
-  }
+  const [showTeam, setShowTeam] = useState(false);
+  const [showAbonnement, setShowAbonnement] = useState(false);
+  const [showLivreurs, setShowLivreurs] = useState(false);
+  const [showClosers, setShowClosers] = useState(false);
+  const [showCampagne, setShowCampagne] = useState(false);
+  const [showIntegrations, setShowIntegrations] = useState(false);
+  const [showBatch, setShowBatch] = useState(false);
+  const [showProduits, setShowProduits] = useState(false);
+  const [showAvis, setShowAvis] = useState(false);
+  const [showCollections, setShowCollections] = useState(false);
+  const [showAide, setShowAide] = useState(false);
 
   async function loadLivreurs() {
-    const { data, error } = await supabase
-      .from("livreurs")
-      .select("*")
-      .order("created_at", { ascending: false });
-    if (!error) setLivreurs(data || []);
-    setLivreursLoaded(true);
+    const { data } = await supabase.from("livreurs").select("*").eq("workspace_id", workspace.id).order("nom");
+    setLivreurs(data || []);
   }
 
   async function loadClosers() {
-    const { data, error } = await supabase
-      .from("closers")
-      .select("*")
-      .order("created_at", { ascending: false });
-    if (!error) setClosers(data || []);
-    setClosersLoaded(true);
-  }
-
-  async function loadComptables() {
-    const { data, error } = await supabase
-      .from("comptables")
-      .select("*")
-      .order("created_at", { ascending: false });
-    if (!error) setComptables(data || []);
-    setComptablesLoaded(true);
+    const { data } = await supabase.from("closers").select("*").eq("workspace_id", workspace.id).order("nom");
+    setClosers(data || []);
   }
 
   async function loadProduits() {
-    const { data, error } = await supabase
+    const { data } = await supabase.from("produits").select("*").eq("workspace_id", workspace.id).order("nom");
+    setProduits(data || []);
+  }
+
+  function parseProduitTexte(texte) {
+    if (!texte) return { nom: "", quantite: 1 };
+    const match = texte.match(/^(.*?)\s*x\s*(\d+)\s*$/i);
+    if (match) return { nom: match[1].trim(), quantite: Number(match[2]) || 1 };
+    return { nom: texte.trim(), quantite: 1 };
+  }
+
+  async function addProduit(form) {
+    const { error } = await supabase.from("produits").insert([{ nom: form.nom, cout_achat: Number(form.cout_achat) || 0, workspace_id: workspace.id }]);
+    if (error) alert("Erreur: " + error.message);
+    else await loadProduits();
+  }
+
+  async function importerProduitsCSV(lignes) {
+    const nomsExistants = new Set(produits.map((p) => p.nom.toLowerCase().trim()));
+    const nomsDejaVusDansCeCSV = new Set();
+    const produitsAImporter = [];
+    let ignores = 0;
+
+    for (const l of lignes) {
+      const nomNormalise = (l.nom || "").toLowerCase().trim();
+      if (!nomNormalise || nomsExistants.has(nomNormalise) || nomsDejaVusDansCeCSV.has(nomNormalise)) {
+        ignores += 1;
+        continue;
+      }
+      nomsDejaVusDansCeCSV.add(nomNormalise);
+      produitsAImporter.push({
+        workspace_id: workspace.id,
+        nom: l.nom,
+        description: l.description || null,
+        prix_vente: l.prix_vente ? Number(l.prix_vente) : null,
+        photo_url: l.photo_url || null,
+        cout_achat: 0,
+      });
+    }
+
+    if (produitsAImporter.length === 0) {
+      return { succes: false, importes: 0, ignores, message: "Aucun nouveau produit à importer — tous existent déjà dans ton catalogue." };
+    }
+
+    const { error } = await supabase
       .from("produits")
+      .upsert(produitsAImporter, { onConflict: "workspace_id,nom", ignoreDuplicates: true });
+    if (error) {
+      return { succes: false, importes: 0, ignores: 0, message: "Erreur : " + error.message };
+    }
+    await loadProduits();
+    return { succes: true, importes: produitsAImporter.length, ignores };
+  }
+
+  async function updateProduitCout(id, cout) {
+    await supabase.from("produits").update({ cout_achat: Number(cout) || 0 }).eq("id", id);
+    await loadProduits();
+  }
+
+  async function updateProduitPrixVente(id, prix) {
+    await supabase.from("produits").update({ prix_vente: Number(prix) || 0 }).eq("id", id);
+    await loadProduits();
+  }
+
+  async function updateProduitPhoto(id, url) {
+    await supabase.from("produits").update({ photo_url: url || null }).eq("id", id);
+    await loadProduits();
+  }
+
+  async function updateProduitGalerie(id, photosGalerie) {
+    await supabase.from("produits").update({ photos_galerie: photosGalerie }).eq("id", id);
+    await loadProduits();
+  }
+
+  async function updateProduitDescription(id, description) {
+    await supabase.from("produits").update({ description: description || null }).eq("id", id);
+    await loadProduits();
+  }
+
+  async function updateProduitStock(id, stock) {
+    await supabase.from("produits").update({ stock_initial: Number(stock) || 0 }).eq("id", id);
+    await loadProduits();
+  }
+
+  async function deleteProduit(id) {
+    await supabase.from("produits").delete().eq("id", id);
+    await loadProduits();
+  }
+
+  async function addLivreur(form) {
+    const { error } = await supabase.from("livreurs").insert([{ ...form, workspace_id: workspace.id }]);
+    if (error) alert("Erreur: " + error.message);
+    else await loadLivreurs();
+  }
+
+  async function deleteLivreur(id, nom) {
+    const commandesLiees = commandes.filter((c) => c.livreur === nom && (c.statut === "en_cours" || c.statut === "echouee")).length;
+    if (commandesLiees > 0) {
+      const confirmer = window.confirm(`${nom} a encore ${commandesLiees} commande${commandesLiees > 1 ? "s" : ""} active${commandesLiees > 1 ? "s" : ""} assignée${commandesLiees > 1 ? "s" : ""}. Si tu le retires, tu ne pourras plus les réassigner facilement. Continuer quand même ?`);
+      if (!confirmer) return;
+    }
+    await supabase.from("livreurs").delete().eq("id", id);
+    await loadLivreurs();
+  }
+
+  async function addCloser(form) {
+    const { error } = await supabase.from("closers").insert([{ ...form, workspace_id: workspace.id }]);
+    if (error) alert("Erreur: " + error.message);
+    else await loadClosers();
+  }
+
+  async function deleteCloser(id, nom) {
+    const commandesLiees = commandes.filter((c) => c.closer === nom && (c.statut === "en_cours" || c.statut === "echouee")).length;
+    if (commandesLiees > 0) {
+      const confirmer = window.confirm(`${nom} a encore ${commandesLiees} commande${commandesLiees > 1 ? "s" : ""} active${commandesLiees > 1 ? "s" : ""} assignée${commandesLiees > 1 ? "s" : ""}. Si tu le retires, tu ne pourras plus les réassigner facilement. Continuer quand même ?`);
+      if (!confirmer) return;
+    }
+    await supabase.from("closers").delete().eq("id", id);
+    await loadClosers();
+  }
+
+  async function assignLivreur(commandeId, nom) {
+    await supabase.from("commandes").update({ livreur: nom || null }).eq("id", commandeId);
+    await supabase.from("relances").insert([
+      { commande_id: commandeId, note: nom ? `🚚 Livreur assigné : ${nom}` : "🚚 Livreur retiré" },
+    ]);
+    await loadCommandes();
+  }
+
+  async function assignCloser(commandeId, nom) {
+    await supabase.from("commandes").update({ closer: nom || null }).eq("id", commandeId);
+    await supabase.from("relances").insert([
+      { commande_id: commandeId, note: nom ? `🎧 Closer assigné : ${nom}` : "🎧 Closer retiré" },
+    ]);
+    await loadCommandes();
+  }
+
+  useEffect(() => {
+    loadLivreurs();
+    loadClosers();
+    loadProduits();
+  }, []);
+
+  const accesBloque = (() => {
+    if (subscription === undefined || subscription === null) return false;
+    if (subscription.status === "active") return false;
+    if (subscription.status === "trial") {
+      const finEssai = new Date(subscription.trial_ends_at);
+      return finEssai < new Date();
+    }
+    if (subscription.status === "suspended" || subscription.status === "cancelled") return true;
+    return false;
+  })();
+
+  const maxCommandesMois = subscription?.subscription_plans?.max_commandes_mois ?? null;
+  const commandesCeMois = commandes.filter((c) => {
+    const d = new Date(c.created_at);
+    const now = new Date();
+    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+  }).length;
+  const quotaAtteint = maxCommandesMois !== null && commandesCeMois >= maxCommandesMois && !accesBloque;
+
+  const knownOrderIds = React.useRef(null);
+  const debounceNouvellesCommandes = React.useRef(null);
+  const [toastNouvellesCommandes, setToastNouvellesCommandes] = useState(null);
+
+  const [notifPermission, setNotifPermission] = useState(
+    typeof Notification !== "undefined" ? Notification.permission : "unsupported"
+  );
+
+  const VAPID_PUBLIC_KEY = "BNEWuL6J-c31X4sab428A92UjDE2GOirvhes0XlQz-bnNngVucHV22AdQzLq_FleLTsCNoFaxYkL_xDqR6WgHFs";
+
+  function urlBase64ToUint8Array(base64String) {
+    const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+    const rawData = window.atob(base64);
+    return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
+  }
+
+  async function activerNotificationsPush() {
+    try {
+      const permission = await Notification.requestPermission();
+      setNotifPermission(permission);
+      if (permission !== "granted") return;
+
+      if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+        alert("Notifications Push non supportées sur ce navigateur");
+        return;
+      }
+
+      const registration = await navigator.serviceWorker.ready;
+      let sub = await registration.pushManager.getSubscription();
+      if (!sub) {
+        sub = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+        });
+      }
+
+      const raw = sub.toJSON();
+      await supabase.from("push_subscriptions").upsert(
+        [{ workspace_id: workspace.id, user_email: session.user.email, endpoint: raw.endpoint, p256dh: raw.keys.p256dh, auth: raw.keys.auth }],
+        { onConflict: "endpoint" }
+      );
+      alert("🔔 Notifications activées, même app fermée !");
+    } catch (e) {
+      alert("Erreur activation notifications: " + e.message);
+    }
+  }
+
+  function playNotifSound() {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      function jouerChaChing(decalage) {
+        const notes = [
+          { freq: 987.77, start: decalage, dur: 0.16, vol: 0.55 },
+          { freq: 1318.51, start: decalage + 0.1, dur: 0.32, vol: 0.6 },
+          { freq: 1975.53, start: decalage + 0.1, dur: 0.32, vol: 0.25 },
+        ];
+        notes.forEach((n) => {
+          const o = ctx.createOscillator();
+          const g = ctx.createGain();
+          o.connect(g);
+          g.connect(ctx.destination);
+          o.type = "sine";
+          o.frequency.value = n.freq;
+          const start = ctx.currentTime + n.start;
+          g.gain.setValueAtTime(0, start);
+          g.gain.linearRampToValueAtTime(n.vol, start + 0.015);
+          g.gain.exponentialRampToValueAtTime(0.001, start + n.dur);
+          o.start(start);
+          o.stop(start + n.dur);
+        });
+      }
+      jouerChaChing(0);
+      jouerChaChing(0.55);
+    } catch (e) {}
+  }
+
+  async function loadCommandes() {
+    const { data, error } = await supabase
+      .from("commandes")
       .select("*")
-      .order("nom", { ascending: true });
-    if (!error) setCatalogueProduits(data || []);
-    setProduitsLoaded(true);
+      .eq("workspace_id", workspace.id)
+      .order("created_at", { ascending: false });
+    if (!error) {
+      const list = data || [];
+      if (knownOrderIds.current !== null) {
+        const nouvelles = list.filter((c) => !knownOrderIds.current.has(c.id));
+        if (nouvelles.length > 0) {
+          playNotifSound();
+          setToastNouvellesCommandes(
+            nouvelles.length === 1
+              ? `🔔 Nouvelle commande — ${nouvelles[0].client}`
+              : `🔔 ${nouvelles.length} nouvelles commandes sont arrivées`
+          );
+          setTimeout(() => setToastNouvellesCommandes(null), 4000);
+        }
+      }
+      knownOrderIds.current = new Set(list.map((c) => c.id));
+      setCommandes(list);
+    }
+    const { data: items } = await supabase.from("commande_items").select("*").eq("workspace_id", workspace.id);
+    setCommandeItems(items || []);
+    setLoaded(true);
+    loadAllRelances();
   }
 
   const [allRelances, setAllRelances] = useState([]);
 
-  async function loadRelances() {
-    const { data, error } = await supabase
-      .from("relances")
-      .select("commande_id, created_at")
-      .order("created_at", { ascending: false });
-    if (!error) setAllRelances(data || []);
+  async function loadAllRelances() {
+    const { data: cmds } = await supabase.from("commandes").select("id").eq("workspace_id", workspace.id);
+    const ids = (cmds || []).map((c) => c.id);
+    if (ids.length === 0) {
+      setAllRelances([]);
+      return;
+    }
+    const { data } = await supabase.from("relances").select("commande_id, created_at").in("commande_id", ids).order("created_at", { ascending: false });
+    setAllRelances(data || []);
   }
 
   useEffect(() => {
-    loadOrders();
-    loadLivreurs();
-    loadClosers();
-    loadComptables();
-    loadProduits();
-    loadRelances();
-    const interval = setInterval(() => {
-      loadOrders();
-      loadLivreurs();
-      loadClosers();
-      loadComptables();
-      loadProduits();
-      loadRelances();
-    }, 15000);
+    loadCommandes();
+    loadAllRelances();
 
     const channel = supabase
-      .channel("commandes-temps-reel")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "commandes" }, () => {
-        loadOrders();
-      })
+      .channel(`commandes-${workspace.id}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "commandes", filter: `workspace_id=eq.${workspace.id}` },
+        () => {
+          // Regroupe les commandes arrivant en rafale (ex: après une pub qui performe bien)
+          // au lieu de recharger et notifier une fois par commande individuelle
+          clearTimeout(debounceNouvellesCommandes.current);
+          debounceNouvellesCommandes.current = setTimeout(() => loadCommandes(), 2000);
+        }
+      )
       .subscribe();
 
     return () => {
-      clearInterval(interval);
       supabase.removeChannel(channel);
     };
   }, []);
 
-  const loaded = ordersLoaded && livreursLoaded && closersLoaded && comptablesLoaded && produitsLoaded;
+  const relanceCountByOrder = useMemo(() => {
+    const map = {};
+    const lastByOrder = {};
+    allRelances.forEach((r) => {
+      map[r.commande_id] = (map[r.commande_id] || 0) + 1;
+      if (!lastByOrder[r.commande_id] || new Date(r.created_at) > new Date(lastByOrder[r.commande_id])) {
+        lastByOrder[r.commande_id] = r.created_at;
+      }
+    });
+    return { count: map, last: lastByOrder };
+  }, [allRelances]);
 
-  function showToast(msg) {
-    setToast(msg);
-    setTimeout(() => setToast(null), 2200);
+  const todoAujourdhui = useMemo(() => {
+    const today = new Date();
+    const todayStr = today.toISOString().slice(0, 10);
+    const now24hAgo = new Date(today.getTime() - 24 * 3600 * 1000);
+    const byMontant = (a, b) => Number(b.montant) - Number(a.montant);
+
+    const actives = commandes.filter((c) => c.statut === "en_cours" || c.statut === "echouee");
+
+    const aRelivrer = actives.filter((c) => c.date_relivraison === todayStr).sort(byMontant);
+
+    const jamaisContactees = actives
+      .filter((c) => !relanceCountByOrder.count[c.id] && aRelivrer.every((a) => a.id !== c.id))
+      .sort(byMontant);
+
+    const sansNouvelles = actives
+      .filter((c) => {
+        if (aRelivrer.some((a) => a.id === c.id)) return false;
+        if (jamaisContactees.some((j) => j.id === c.id)) return false;
+        const last = relanceCountByOrder.last[c.id];
+        if (!last) return false;
+        return new Date(last) < now24hAgo;
+      })
+      .sort(byMontant);
+
+    const total = aRelivrer.length + jamaisContactees.length + sansNouvelles.length;
+    const echouees = commandes.filter((c) => c.statut === "echouee");
+    const enCoursOuEchouee = commandes.filter((c) => c.statut === "en_cours" || c.statut === "echouee");
+    const argentARisque = enCoursOuEchouee.reduce((s, c) => s + Number(c.montant), 0);
+    const argentRecuperable = echouees.reduce((s, c) => s + Number(c.montant), 0);
+
+    return { aRelivrer, jamaisContactees, sansNouvelles, total, argentARisque, argentRecuperable };
+  }, [commandes, relanceCountByOrder]);
+
+  const [vue, setVue] = useState("commandes");
+  const [datePreset, setDatePreset] = useState("aujourdhui");
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
+
+  const dateRange = useMemo(() => {
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    let start, end;
+    if (datePreset === "aujourdhui") {
+      start = startOfToday;
+      end = new Date(startOfToday.getTime() + 86400000);
+    } else if (datePreset === "hier") {
+      start = new Date(startOfToday.getTime() - 86400000);
+      end = startOfToday;
+    } else if (datePreset === "semaine") {
+      const day = startOfToday.getDay();
+      const diff = day === 0 ? 6 : day - 1;
+      start = new Date(startOfToday.getTime() - diff * 86400000);
+      end = new Date(now.getTime() + 60000);
+    } else if (datePreset === "mois") {
+      start = new Date(now.getFullYear(), now.getMonth(), 1);
+      end = new Date(now.getTime() + 60000);
+    } else if (datePreset === "personnalise" && customStart && customEnd) {
+      start = new Date(customStart + "T00:00:00");
+      end = new Date(customEnd + "T23:59:59");
+    } else {
+      start = new Date(0);
+      end = new Date(now.getTime() + 60000);
+    }
+    return { start, end };
+  }, [datePreset, customStart, customEnd]);
+
+  const [recherche, setRecherche] = useState("");
+
+  const commandesInRange = useMemo(() => {
+    return commandes.filter((c) => {
+      const d = new Date(c.created_at);
+      return d >= dateRange.start && d < dateRange.end;
+    });
+  }, [commandes, dateRange]);
+
+  const [filterStatut, setFilterStatut] = useState("toutes");
+
+  const commandesAffichees = useMemo(() => {
+    let r = commandesInRange;
+    if (filterStatut !== "toutes") r = r.filter((c) => c.statut === filterStatut);
+    if (recherche.trim()) {
+      const q = recherche.trim().toLowerCase();
+      r = r.filter((c) => (c.client || "").toLowerCase().includes(q) || (c.tel || "").includes(q));
+    }
+    return r;
+  }, [commandesInRange, recherche, filterStatut]);
+
+  const groupedByDay = useMemo(() => {
+    const groups = {};
+    commandesAffichees.forEach((c) => {
+      const d = new Date(c.created_at);
+      const dayKey = d.toISOString().slice(0, 10);
+      if (!groups[dayKey]) {
+        groups[dayKey] = { label: d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }), orders: [] };
+      }
+      groups[dayKey].orders.push(c);
+    });
+    return Object.entries(groups).sort((a, b) => (a[0] < b[0] ? 1 : -1)).map(([, val]) => val);
+  }, [commandesAffichees]);
+
+  function exportCSV() {
+    const estRetail = workspace.activity_type === "retail";
+    const headers = estRetail
+      ? ["Client", "Téléphone", "Produit", "Montant", "Zone", "Statut", "Livreur", "Mode de vente", "Montant payé", "Solde restant", "Date"]
+      : ["Client", "Téléphone", "Produit", "Montant", "Zone", "Statut", "Livreur", "Date"];
+    const rows = commandesAffichees.map((c) => {
+      const base = [c.client, c.tel, c.produit, c.montant, c.zone || "", STATUTS[c.statut]?.label || c.statut, c.livreur || ""];
+      if (estRetail) {
+        const paye = Number(c.montant_paye || 0);
+        base.push(c.mode_vente === "expedition" ? "Expédition" : c.mode_vente === "livraison" ? "Livraison" : "Sur place", paye, Number(c.montant) - paye);
+      }
+      base.push(new Date(c.created_at).toLocaleDateString("fr-FR"));
+      return base;
+    });
+    function neutraliser(valeur) {
+      const s = String(valeur ?? "");
+      if (/^[=+\-@\t\r]/.test(s)) return "'" + s;
+      return s;
+    }
+    const csv = [headers, ...rows].map((row) => row.map((cell) => `"${neutraliser(cell).replace(/"/g, '""')}"`).join(";")).join("\n");
+    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${workspace.name}-export-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
+
+  const periodLabel = { aujourdhui: "Aujourd'hui", hier: "Hier", semaine: "Cette semaine", mois: "Ce mois", personnalise: "Période personnalisée" }[datePreset];
+
+  const quantitesParProduit = useMemo(() => {
+    const map = {};
+    const commandesAvecItems = new Set(commandeItems.map((it) => it.commande_id));
+    commandes.forEach((c) => {
+      if (commandesAvecItems.has(c.id)) return;
+      const { nom, quantite } = parseProduitTexte(c.produit);
+      if (!nom) return;
+      if (!map[nom]) map[nom] = { commandees: 0, livrees: 0 };
+      if (c.statut !== "echouee") map[nom].commandees += quantite;
+      if (c.statut === "confirmee") map[nom].livrees += quantite;
+    });
+    const commandesById = Object.fromEntries(commandes.map((c) => [c.id, c]));
+    commandeItems.forEach((it) => {
+      const c = commandesById[it.commande_id];
+      if (!c || !it.produit_nom) return;
+      if (!map[it.produit_nom]) map[it.produit_nom] = { commandees: 0, livrees: 0 };
+      if (c.statut !== "echouee") map[it.produit_nom].commandees += it.quantite;
+      if (c.statut === "confirmee") map[it.produit_nom].livrees += it.quantite;
+    });
+    return map;
+  }, [commandes, commandeItems]);
+
+  const produitsAvecBenefice = useMemo(() => {
+    return produits
+      .map((p) => {
+        const q = quantitesParProduit[p.nom] || { commandees: 0, livrees: 0 };
+        const coutAchat = Number(p.cout_achat) || 0;
+        const prixVente = Number(p.prix_vente) || 0;
+        const margeUnitaire = prixVente - coutAchat;
+        const beneficeRealise = margeUnitaire * q.livrees;
+        return { ...p, commandees: q.commandees, livrees: q.livrees, margeUnitaire, beneficeRealise };
+      })
+      .sort((a, b) => b.beneficeRealise - a.beneficeRealise);
+  }, [produits, quantitesParProduit]);
+
+  const produitStockCritique = useMemo(() => {
+    const candidats = produits
+      .map((p) => {
+        const stock = Number(p.stock_initial || 0);
+        const q = quantitesParProduit[p.nom] || { commandees: 0 };
+        const restant = stock - q.commandees;
+        return { nom: p.nom, stock, restant };
+      })
+      .filter((p) => p.stock > 0 && p.restant <= 5);
+    if (candidats.length === 0) return null;
+    return candidats.sort((a, b) => a.restant - b.restant)[0];
+  }, [produits, quantitesParProduit]);
+
+  const validationsParJour = useMemo(() => {
+    const confirmeesAvecDate = commandes.filter((c) => c.statut === "confirmee" && c.confirmed_at);
+    const map = {};
+    confirmeesAvecDate.forEach((c) => {
+      const dValidation = new Date(c.confirmed_at);
+      const keyValidation = dValidation.toISOString().slice(0, 10);
+      const dCreation = new Date(c.created_at);
+      const keyCreation = dCreation.toISOString().slice(0, 10);
+      const memeJour = keyValidation === keyCreation;
+      if (!map[keyValidation]) {
+        map[keyValidation] = { date: keyValidation, label: dValidation.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }), orders: [] };
+      }
+      map[keyValidation].orders.push({ ...c, memeJour, labelCreation: dCreation.toLocaleDateString("fr-FR", { day: "numeric", month: "short" }) });
+    });
+    return Object.values(map).sort((a, b) => (a.date < b.date ? 1 : -1));
+  }, [commandes]);
+
+  const nonValideesParJour = useMemo(() => {
+    const nonValidees = commandes.filter((c) => c.statut === "en_cours" || c.statut === "echouee");
+    const map = {};
+    nonValidees.forEach((c) => {
+      const d = new Date(c.created_at);
+      const key = d.toISOString().slice(0, 10);
+      if (!map[key]) map[key] = { date: key, label: d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }), orders: [] };
+      map[key].orders.push(c);
+    });
+    return Object.values(map).sort((a, b) => (a.date < b.date ? 1 : -1));
+  }, [commandes]);
+
+  const produitsClassement = useMemo(() => {
+    const map = {};
+    commandesInRange.forEach((c) => {
+      const nom = (c.produit || "Autre").split(" x")[0].trim();
+      if (!map[nom]) map[nom] = { nom, ventes: 0, revenus: 0 };
+      map[nom].ventes += 1;
+      map[nom].revenus += Number(c.montant);
+    });
+    return Object.values(map).sort((a, b) => b.ventes - a.ventes);
+  }, [commandesInRange]);
+
+  const meilleurProduit = produitsClassement[0] || null;
+  const produitPlusRentable = produitsClassement.length ? [...produitsClassement].sort((a, b) => b.revenus - a.revenus)[0] : null;
+
+  const evolutionData = useMemo(() => {
+    const map = {};
+    commandesInRange.forEach((c) => {
+      const d = new Date(c.created_at);
+      const key = d.toISOString().slice(0, 10);
+      if (!map[key]) map[key] = { date: key, commandes: 0, label: d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" }) };
+      map[key].commandes += 1;
+    });
+    return Object.values(map).sort((a, b) => (a.date < b.date ? -1 : 1));
+  }, [commandesInRange]);
+
+  const clientsSuspects = useMemo(() => {
+    const map = {};
+    commandes.forEach((c) => {
+      const key = c.tel;
+      if (!key) return;
+      if (!map[key]) map[key] = { tel: key, nom: c.client, echouees: 0, total: 0 };
+      map[key].total += 1;
+      if (c.statut === "echouee") map[key].echouees += 1;
+    });
+    return Object.values(map).filter((c) => c.echouees >= 3);
+  }, [commandes]);
+
+  const anomaliesProduitZone = useMemo(() => {
+    const traites = commandes.filter((c) => c.statut === "confirmee" || c.statut === "echouee");
+
+    const globalParProduit = {};
+    traites.forEach((c) => {
+      const p = (c.produit || "").split(" x")[0].trim();
+      if (!p) return;
+      if (!globalParProduit[p]) globalParProduit[p] = { total: 0, echecs: 0 };
+      globalParProduit[p].total += 1;
+      if (c.statut === "echouee") globalParProduit[p].echecs += 1;
+    });
+
+    const parProduitZone = {};
+    traites.forEach((c) => {
+      const p = (c.produit || "").split(" x")[0].trim();
+      const z = (c.zone || "").trim();
+      if (!p || !z) return;
+      const key = p + "|||" + z;
+      if (!parProduitZone[key]) parProduitZone[key] = { produit: p, zone: z, total: 0, echecs: 0 };
+      parProduitZone[key].total += 1;
+      if (c.statut === "echouee") parProduitZone[key].echecs += 1;
+    });
+
+    const anomalies = [];
+    Object.values(parProduitZone).forEach((g) => {
+      if (g.total < 5) return;
+      const tauxLocal = g.echecs / g.total;
+      const global = globalParProduit[g.produit];
+      const tauxGlobal = global && global.total > 0 ? global.echecs / global.total : 0;
+      const ecartPoints = (tauxLocal - tauxGlobal) * 100;
+      if (ecartPoints >= 15 && tauxLocal >= tauxGlobal * 1.5) {
+        anomalies.push({ produit: g.produit, zone: g.zone, total: g.total, tauxLocal: Math.round(tauxLocal * 100), tauxGlobal: Math.round(tauxGlobal * 100) });
+      }
+    });
+
+    return anomalies.sort((a, b) => b.tauxLocal - a.tauxLocal);
+  }, [commandes]);
+
+  const clients = useMemo(() => {
+    const map = {};
+    commandes.forEach((c) => {
+      const key = c.tel || c.client;
+      if (!map[key]) map[key] = { nom: c.client, tel: c.tel, zone: c.zone, commandes: [] };
+      map[key].commandes.push(c);
+    });
+    return Object.values(map)
+      .map((cl) => {
+        const confirmeesTriees = cl.commandes
+          .filter((c) => c.statut === "confirmee")
+          .map((c) => new Date(c.created_at))
+          .sort((a, b) => a - b);
+
+        let intervalleMoyen = null;
+        let joursDepuisDernier = null;
+        let joursDeRetard = null;
+        if (confirmeesTriees.length >= 2) {
+          const intervalles = [];
+          for (let i = 1; i < confirmeesTriees.length; i++) {
+            intervalles.push((confirmeesTriees[i] - confirmeesTriees[i - 1]) / 86400000);
+          }
+          intervalleMoyen = Math.round(intervalles.reduce((s, v) => s + v, 0) / intervalles.length);
+          const dernier = confirmeesTriees[confirmeesTriees.length - 1];
+          joursDepuisDernier = Math.round((new Date() - dernier) / 86400000);
+          joursDeRetard = joursDepuisDernier - intervalleMoyen;
+        }
+
+        return {
+          ...cl,
+          total: cl.commandes.length,
+          confirmees: cl.commandes.filter((c) => c.statut === "confirmee").length,
+          echouees: cl.commandes.filter((c) => c.statut === "echouee").length,
+          montantTotal: cl.commandes.filter((c) => c.statut === "confirmee").reduce((s, c) => s + Number(c.montant), 0),
+          intervalleMoyen,
+          joursDepuisDernier,
+          joursDeRetard,
+        };
+      })
+      .sort((a, b) => b.montantTotal - a.montantTotal);
+  }, [commandes]);
+
+  const clientsARelancer = useMemo(() => {
+    return clients.filter((c) => c.joursDeRetard !== null && c.joursDeRetard >= 0).sort((a, b) => b.joursDeRetard - a.joursDeRetard);
+  }, [clients]);
+
+  async function addCommande(form) {
+    if (accesBloque) {
+      alert("Ton essai gratuit est terminé. Passe à un plan payant pour continuer à ajouter des commandes.");
+      return;
+    }
+    if (quotaAtteint) {
+      alert("Quota de commandes du mois atteint pour ton plan. Passe à un plan supérieur pour continuer.");
+      return;
+    }
+    const montantTotal = Number(form.montant);
+
+    // Détecte une commande très similaire déjà passée récemment (même client, même produit)
+    // — évite d'envoyer deux livreurs pour la même personne par erreur
+    const deuxHeuresAvant = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    const { data: doublonsPotentiels } = await supabase
+      .from("commandes")
+      .select("id, produit, created_at, statut")
+      .eq("workspace_id", workspace.id)
+      .eq("tel", form.tel)
+      .neq("statut", "echouee")
+      .gte("created_at", deuxHeuresAvant);
+
+    const doublon = (doublonsPotentiels || []).find((d) =>
+      d.produit?.toLowerCase().includes((form.produit || "").toLowerCase().split(" ")[0])
+    );
+
+    if (doublon) {
+      const minutesEcoulees = Math.round((Date.now() - new Date(doublon.created_at).getTime()) / 60000);
+      const continuer = window.confirm(
+        `⚠️ Ce client a déjà une commande similaire en cours, passée il y a ${minutesEcoulees} min.\n\nContinuer quand même et créer une deuxième commande ?`
+      );
+      if (!continuer) return;
+    }
+
+    const montantDejaPaye = workspace.activity_type === "retail" ? (form.montant_paye === "" ? montantTotal : Number(form.montant_paye)) : 0;
+    const payeEnEntier = workspace.activity_type === "retail" ? montantDejaPaye >= montantTotal : false;
+    const statutInitial = workspace.activity_type === "retail" ? (payeEnEntier ? "confirmee" : "en_cours") : "en_cours";
+    const { error } = await supabase.from("commandes").insert([
+      { ...form, montant: montantTotal, montant_paye: montantDejaPaye, workspace_id: workspace.id, statut: statutInitial, confirmed_at: statutInitial === "confirmee" ? new Date().toISOString() : null, confirmed_by: statutInitial === "confirmee" ? session.user.email.split("@")[0] : null },
+    ]);
+    if (error) {
+      alert("Erreur: " + error.message);
+      return;
+    }
+    await loadCommandes();
+    setShowAdd(false);
+  }
+
+  const totalCA = commandesInRange.reduce((s, c) => s + Number(c.montant), 0);
+  const confirmees = commandesInRange.filter((c) => c.statut === "confirmee");
+  const caConfirme = confirmees.reduce((s, c) => s + Number(c.montant), 0);
+  const echoueesInRange = commandesInRange.filter((c) => c.statut === "echouee");
+  const enCoursInRange = commandesInRange.filter((c) => c.statut === "en_cours");
+  const aRisqueCount = echoueesInRange.length + enCoursInRange.length;
+  const tauxLivraison = commandesInRange.length ? Math.round((confirmees.length / commandesInRange.length) * 100) : 0;
+  const tauxEchec = commandesInRange.length ? Math.round((echoueesInRange.length / commandesInRange.length) * 100) : 0;
+
+  const COUT_LIVRAISON = 1500;
+  const coutLivraisons = workspace.activity_type === "retail" ? confirmees.filter((c) => c.mode_vente === "livraison" || c.mode_vente === "expedition").length * COUT_LIVRAISON : confirmees.length * COUT_LIVRAISON;
+
+  const coutProduitsInfo = useMemo(() => {
+    let coutTotal = 0;
+    let nbInconnu = 0;
+    let montantInconnu = 0;
+    confirmees.forEach((c) => {
+      const { nom, quantite } = parseProduitTexte(c.produit);
+      const trouve = produits.find((p) => p.nom.toLowerCase() === nom.toLowerCase());
+      if (!trouve) {
+        nbInconnu += 1;
+        montantInconnu += Number(c.montant);
+      } else {
+        coutTotal += trouve.cout_achat * quantite;
+      }
+    });
+    return { coutTotal, nbInconnu, montantInconnu };
+  }, [confirmees, produits]);
+
+  const beneficeReel = caConfirme - coutLivraisons - coutProduitsInfo.coutTotal;
+
+  const depotsParLivreur = useMemo(() => {
+    return livreurs
+      .map((l) => {
+        const mesLivrees = confirmees.filter((c) => c.livreur === l.nom);
+        const montantRecupere = mesLivrees.reduce((s, c) => s + Number(c.montant), 0);
+        const commission = mesLivrees.length * COUT_LIVRAISON;
+        return { nom: l.nom, livrees: mesLivrees.length, montantRecupere, commission, aDeposer: montantRecupere - commission };
+      })
+      .filter((l) => l.livrees > 0)
+      .sort((a, b) => b.aDeposer - a.aDeposer);
+  }, [livreurs, confirmees]);
+
+  const totalCommission = depotsParLivreur.reduce((s, l) => s + l.commission, 0);
+  const totalADeposer = depotsParLivreur.reduce((s, l) => s + l.aDeposer, 0);
+
+  const repartitionCloserLivreur = useMemo(() => {
+    const map = {};
+    commandesInRange.forEach((c) => {
+      if (!c.closer || !c.livreur) return;
+      const key = c.closer + "|||" + c.livreur;
+      if (!map[key]) map[key] = { closer: c.closer, livreur: c.livreur, total: 0, produits: {} };
+      map[key].total += 1;
+      const { nom, quantite } = parseProduitTexte(c.produit);
+      if (nom) map[key].produits[nom] = (map[key].produits[nom] || 0) + quantite;
+    });
+    return Object.values(map)
+      .map((r) => ({ ...r, produitsListe: Object.entries(r.produits).map(([nom, qte]) => ({ nom, qte })).sort((a, b) => b.qte - a.qte) }))
+      .sort((a, b) => b.total - a.total);
+  }, [commandesInRange]);
+
+  const livreursAvecCommandes = useMemo(() => {
+    const map = {};
+    commandesInRange.forEach((c) => {
+      if (!c.livreur) return;
+      map[c.livreur] = (map[c.livreur] || 0) + 1;
+    });
+    return Object.entries(map).map(([nom, total]) => ({ nom, total })).sort((a, b) => b.total - a.total);
+  }, [commandesInRange]);
+
+  const meilleurLivreur = useMemo(() => {
+    if (depotsParLivreur.length === 0) return null;
+    const avecTaux = depotsParLivreur.map((l) => {
+      const total = livreursAvecCommandes.find((x) => x.nom === l.nom)?.total || l.livrees;
+      return { ...l, taux: total > 0 ? Math.round((l.livrees / total) * 100) : 0, total };
+    });
+    return avecTaux.sort((a, b) => b.taux - a.taux)[0];
+  }, [depotsParLivreur, livreursAvecCommandes]);
+
+  const monProfilLivreur = livreurs.find((l) => l.email && l.email.toLowerCase() === session.user.email.toLowerCase());
+
+  if (workspace.role === "livreur" && monProfilLivreur) {
+    return (
+      <LivreurPortalSaas
+        livreur={monProfilLivreur}
+        commandes={commandes.filter((c) => c.livreur === monProfilLivreur.nom)}
+        currency={workspace.currency}
+        onStatusChanged={loadCommandes}
+      />
+    );
+  }
+
+  if (workspace.role === "comptable") {
+    return <ComptablePortalSaas workspace={workspace} commandes={commandes} livreurs={livreurs} produits={produits} />;
+  }
+
+  const monProfilCloser = closers.find((c) => c.email && c.email.toLowerCase() === session.user.email.toLowerCase());
+
+  if (workspace.role === "closer" && monProfilCloser) {
+    return (
+      <CloserPortalSaas
+        closer={monProfilCloser}
+        commandes={commandes}
+        currency={workspace.currency}
+        workspace={workspace}
+        onStatusChanged={loadCommandes}
+      />
+    );
+  }
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#FAFAF7", fontFamily: "'IBM Plex Sans', sans-serif", width: "100%", maxWidth: "100vw", overflowX: "hidden", boxSizing: "border-box" }}>
+      <style>{`
+        .rv-mesh-blob { position: absolute; border-radius: 50%; filter: blur(40px); pointer-events: none; }
+        .rv-mesh-1 { width: 180px; height: 180px; background: radial-gradient(circle, rgba(232,146,10,0.45) 0%, rgba(232,146,10,0) 70%); top: -60px; right: -40px; animation: rvMeshFloat1 9s ease-in-out infinite; }
+        .rv-mesh-2 { width: 140px; height: 140px; background: radial-gradient(circle, rgba(127,214,163,0.4) 0%, rgba(127,214,163,0) 70%); bottom: -50px; left: 10%; animation: rvMeshFloat2 11s ease-in-out infinite; }
+        .rv-mesh-3 { width: 110px; height: 110px; background: radial-gradient(circle, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0) 70%); top: 20%; right: 25%; animation: rvMeshFloat3 7s ease-in-out infinite; }
+        @keyframes rvMeshFloat1 { 0%, 100% { transform: translate(0,0) scale(1); } 50% { transform: translate(-20px,20px) scale(1.15); } }
+        @keyframes rvMeshFloat2 { 0%, 100% { transform: translate(0,0) scale(1); } 50% { transform: translate(25px,-15px) scale(1.1); } }
+        @keyframes rvMeshFloat3 { 0%, 100% { transform: translate(0,0) scale(1); opacity: 0.6; } 50% { transform: translate(-15px,-10px) scale(1.3); opacity: 1; } }
+        .rv-wave-1 { animation: rvWaveDrift 9s linear infinite; }
+        .rv-wave-2 { animation: rvWaveDrift 14s linear infinite reverse; }
+        .rv-wave-3 { animation: rvWaveDrift 20s linear infinite; }
+        @keyframes rvWaveDrift { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+        .rv-glow { animation: rvGlowBreathe 4s ease-in-out infinite; }
+        @keyframes rvGlowBreathe { 0%, 100% { opacity: 0.5; transform: scale(1); } 50% { opacity: 1; transform: scale(1.15); } }
+        .rv-3d-card { animation: rv3DFloat 6s ease-in-out infinite; transform-style: preserve-3d; }
+        .rv-glass-card { position: relative; overflow: hidden; border-radius: 12px; padding: 11px 13px; background: linear-gradient(155deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.06) 60%, rgba(255,255,255,0.1) 100%); border: 1px solid rgba(255,255,255,0.25); box-shadow: 0 4px 14px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.3), inset 0 -1px 0 rgba(0,0,0,0.08); }
+        .rv-glass-shine { position: absolute; top: -50%; left: -60%; width: 60%; height: 200%; background: linear-gradient(120deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.35) 50%, rgba(255,255,255,0) 100%); transform: rotate(20deg); animation: rvShineSweep 3.5s ease-in-out infinite; pointer-events: none; }
+        @keyframes rvShineSweep { 0% { left: -60%; } 35%, 100% { left: 140%; } }
+        @keyframes rv3DFloat {
+          0%, 100% { transform: rotateX(0deg) rotateY(0deg) translateZ(0); }
+          25% { transform: rotateX(3deg) rotateY(-4deg) translateZ(6px); }
+          50% { transform: rotateX(0deg) rotateY(0deg) translateZ(0); }
+          75% { transform: rotateX(-3deg) rotateY(4deg) translateZ(6px); }
+        }
+        .rv-livedot { animation: rvPulseDot 2s ease-in-out infinite; }
+        @keyframes rvPulseDot { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .rv-saas-celebrate-in { animation: rvSaasCelebrateIn 0.45s cubic-bezier(0.34, 1.56, 0.64, 1); }
+        @keyframes rvSaasCelebrateIn {
+          0% { opacity: 0; transform: scale(0.5) translateY(20px); }
+          60% { opacity: 1; transform: scale(1.08) translateY(-4px); }
+          100% { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        .rv-saas-celebrate-out { animation: rvSaasCelebrateOut 0.35s ease forwards; }
+        @keyframes rvSaasCelebrateOut {
+          from { opacity: 1; transform: scale(1); }
+          to { opacity: 0; transform: scale(0.92) translateY(-10px); }
+        }
+        .rv-saas-confetti { animation: rvSaasConfetti 1.4s ease-out forwards; }
+        @keyframes rvSaasConfetti {
+          0% { transform: translateY(0) rotate(0deg); opacity: 1; }
+          100% { transform: translateY(90px) rotate(360deg); opacity: 0; }
+        }
+        .rv-saas-sidebar { display: none; }
+        .rv-saas-content { }
+        .rv-saas-tabs-mobile { }
+        .rv-saas-bottomnav { display: flex; }
+        .rv-saas-content { padding-bottom: 76px; }
+        @media (min-width: 900px) {
+          .rv-saas-sidebar {
+            display: flex;
+            position: fixed;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            width: 220px;
+            background: #16231F;
+            flex-direction: column;
+            padding: 24px 14px;
+            z-index: 30;
+          }
+          .rv-saas-content {
+            margin-left: 220px;
+            max-width: none;
+            padding: 0 32px;
+          }
+          .rv-saas-tabs-mobile { display: none !important; }
+          .rv-saas-bottomnav { display: none !important; }
+        }
+      `}</style>
+
+      <div className="rv-saas-sidebar">
+        <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 18, color: "white", marginBottom: 28, padding: "0 8px" }}>
+          RECU<span style={{ color: "#e8920a" }}>VENTE</span>
+        </div>
+        {[
+          { key: "aujourdhui", label: "Aujourd'hui" },
+          { key: "commandes", label: workspace.activity_type === "retail" ? "Ventes" : "Commandes" },
+          { key: "validations", label: "Validations" },
+          { key: "clients", label: "Clients" },
+          ...(workspace.role === "owner" || workspace.role === "admin" ? [{ key: "produits_vue", label: "📦 Produits" }] : []),
+          ...(workspace.role === "owner" || workspace.role === "admin" ? [{ key: "compta", label: "🧮 Compta" }] : []),
+        ].map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setVue(t.key)}
+            style={{
+              display: "flex", alignItems: "center", padding: "11px 12px", borderRadius: 9, border: "none",
+              background: vue === t.key ? "rgba(255,255,255,0.1)" : "transparent",
+              color: vue === t.key ? "white" : "rgba(255,255,255,0.6)",
+              fontSize: 14, fontWeight: vue === t.key ? 600 : 500, textAlign: "left", marginBottom: 3, cursor: "pointer",
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
+        {(workspace.role === "owner" || workspace.role === "admin") && (
+          <button
+            onClick={() => setShowProduits(true)}
+            style={{ display: "flex", alignItems: "center", padding: "11px 12px", borderRadius: 9, border: "none", background: "transparent", color: "rgba(255,255,255,0.6)", fontSize: 14, fontWeight: 500, textAlign: "left", marginBottom: 3, cursor: "pointer" }}
+          >
+            📦 Catalogue
+          </button>
+        )}
+        {(workspace.role === "owner" || workspace.role === "admin") && (
+          <button
+            onClick={() => setShowAvis(true)}
+            style={{ display: "flex", alignItems: "center", padding: "11px 12px", borderRadius: 9, border: "none", background: "transparent", color: "rgba(255,255,255,0.6)", fontSize: 14, fontWeight: 500, textAlign: "left", marginBottom: 3, cursor: "pointer" }}
+          >
+            ⭐ Avis clients
+          </button>
+        )}
+        {(workspace.role === "owner" || workspace.role === "admin") && (
+          <button
+            onClick={() => setShowCollections(true)}
+            style={{ display: "flex", alignItems: "center", padding: "11px 12px", borderRadius: 9, border: "none", background: "transparent", color: "rgba(255,255,255,0.6)", fontSize: 14, fontWeight: 500, textAlign: "left", marginBottom: 3, cursor: "pointer" }}
+          >
+            📁 Collections
+          </button>
+        )}
+        {workspace.role === "owner" && (
+          <>
+            <div style={{ height: 1, background: "rgba(255,255,255,0.1)", margin: "10px 8px" }} />
+            <button
+              onClick={() => setShowTeam(true)}
+              style={{ display: "flex", alignItems: "center", padding: "11px 12px", borderRadius: 9, border: "none", background: "transparent", color: "rgba(255,255,255,0.6)", fontSize: 14, fontWeight: 500, textAlign: "left", marginBottom: 3, cursor: "pointer" }}
+            >
+              👥 Gérer l'équipe
+            </button>
+            <button
+              onClick={() => setShowIntegrations(true)}
+              style={{ display: "flex", alignItems: "center", padding: "11px 12px", borderRadius: 9, border: "none", background: "rgba(232,146,10,0.15)", color: "#e8920a", fontSize: 14, fontWeight: 600, textAlign: "left", marginBottom: 3, cursor: "pointer" }}
+            >
+              🛍️ Ma Boutique
+            </button>
+            <button
+              onClick={() => setShowAbonnement(true)}
+              style={{ display: "flex", alignItems: "center", padding: "11px 12px", borderRadius: 9, border: "none", background: "transparent", color: "rgba(255,255,255,0.6)", fontSize: 14, fontWeight: 500, textAlign: "left", marginBottom: 3, cursor: "pointer" }}
+            >
+              💳 Mon abonnement
+            </button>
+            <button
+              onClick={() => setShowAide(true)}
+              style={{ display: "flex", alignItems: "center", padding: "11px 12px", borderRadius: 9, border: "none", background: "transparent", color: "rgba(255,255,255,0.6)", fontSize: 14, fontWeight: 500, textAlign: "left", marginBottom: 3, cursor: "pointer" }}
+            >
+              ❓ Aide
+            </button>
+          </>
+        )}
+        <div style={{ marginTop: "auto" }}>
+          <button onClick={() => supabase.auth.signOut()} style={{ width: "100%", padding: "8px 0", borderRadius: 9, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "rgba(255,255,255,0.6)", fontWeight: 500, fontSize: 12.5, cursor: "pointer" }}>
+            Déconnexion
+          </button>
+        </div>
+      </div>
+
+      <div className="rv-saas-content">
+
+      <div style={{ background: "#1a7a3c", color: "white", padding: "20px 20px 34px", position: "relative", overflow: "hidden" }}>
+        <div className="rv-mesh-blob rv-mesh-1" />
+        <div className="rv-mesh-blob rv-mesh-2" />
+        <div className="rv-mesh-blob rv-mesh-3" />
+
+        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 55, overflow: "hidden", pointerEvents: "none" }}>
+          <svg className="rv-wave-1" viewBox="0 0 400 60" preserveAspectRatio="none" style={{ position: "absolute", bottom: -5, width: "200%", height: 45 }}>
+            <path d="M0,30 C40,10 80,50 120,30 C160,10 200,50 240,30 C280,10 320,50 360,30 C380,20 390,25 400,30 L400,60 L0,60 Z" fill="rgba(232,146,10,0.4)" />
+          </svg>
+          <svg className="rv-wave-2" viewBox="0 0 400 60" preserveAspectRatio="none" style={{ position: "absolute", bottom: -8, width: "200%", height: 38 }}>
+            <path d="M0,25 C50,45 90,5 140,25 C190,45 230,5 280,25 C330,45 370,5 400,20 L400,60 L0,60 Z" fill="rgba(255,255,255,0.28)" />
+          </svg>
+          <svg className="rv-wave-3" viewBox="0 0 400 60" preserveAspectRatio="none" style={{ position: "absolute", bottom: -3, width: "200%", height: 32 }}>
+            <path d="M0,35 C60,15 100,45 160,25 C220,5 260,45 320,25 C360,10 380,30 400,25 L400,60 L0,60 Z" fill="rgba(248,180,60,0.28)" />
+          </svg>
+        </div>
+
+        <div style={{ position: "relative", zIndex: 1 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+            <span style={{ fontSize: 13, opacity: 0.8 }}>Espace de</span>
+            <span className="rv-livedot" style={{ width: 6, height: 6, borderRadius: "50%", background: "#7fd6a3", display: "inline-block", marginLeft: 4 }} />
+            <span style={{ fontSize: 9.5, fontWeight: 500, opacity: 0.65 }}>EN DIRECT</span>
+            <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+              {workspace.role === "owner" && (
+                <>
+                  <button onClick={() => setShowTeam(true)} className="rv-saas-tabs-mobile" aria-label="Gérer l'équipe" style={{ background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: "6px 8px", borderRadius: 7, fontSize: 13, cursor: "pointer" }}>
+                    👥
+                  </button>
+                  <button onClick={() => setShowProduits(true)} className="rv-saas-tabs-mobile" aria-label="Catalogue" style={{ background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: "6px 8px", borderRadius: 7, fontSize: 13, cursor: "pointer" }}>
+                    📦
+                  </button>
+                  <button onClick={() => setShowAbonnement(true)} className="rv-saas-tabs-mobile" aria-label="Mon abonnement" style={{ background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: "6px 8px", borderRadius: 7, fontSize: 13, cursor: "pointer" }}>
+                    💳
+                  </button>
+                  <button onClick={() => setShowIntegrations(true)} className="rv-saas-tabs-mobile" aria-label="Ma Boutique" style={{ background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: "6px 8px", borderRadius: 7, fontSize: 13, cursor: "pointer" }}>
+                    🛍️
+                  </button>
+                </>
+              )}
+              <button onClick={() => supabase.auth.signOut()} aria-label="Déconnexion" style={{ background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: "6px 10px", borderRadius: 7, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>
+                ⏻ Déconnexion
+              </button>
+            </div>
+          </div>
+          <div style={{ fontFamily: "'Fraunces', serif", fontSize: 24, fontWeight: 700 }}>{workspace.name}</div>
+          <div style={{ fontSize: 12, opacity: 0.7, marginTop: 6 }}>
+            {workspace.country} · {workspace.currency} · rôle : {workspace.role}
+          </div>
+
+          <div style={{ marginTop: 16, perspective: "800px" }}>
+            <div className="rv-3d-card" style={{ position: "relative", padding: "14px 16px", borderRadius: 14, background: "linear-gradient(155deg, rgba(255,255,255,0.14) 0%, rgba(255,255,255,0.03) 70%)", border: "1px solid rgba(255,255,255,0.18)", boxShadow: "0 10px 24px rgba(0,0,0,0.2)" }}>
+              <div className="rv-glow" style={{ position: "absolute", top: -16, left: -16, width: 100, height: 100, borderRadius: "50%", background: "radial-gradient(circle, rgba(232,146,10,0.35) 0%, rgba(232,146,10,0) 70%)", pointerEvents: "none" }} />
+              <div style={{ fontSize: 12, opacity: 0.85, textTransform: "uppercase", letterSpacing: "0.04em", position: "relative" }}>Argent récupéré</div>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 32, fontWeight: 700, color: "#e8920a", marginTop: 4, position: "relative" }}>{caConfirme.toLocaleString("fr-FR")} {workspace.currency}</div>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+            <div className="rv-glass-card" style={{ flex: 1, minWidth: 0 }}>
+              <div className="rv-glass-shine" />
+              <div style={{ fontSize: 10.5, opacity: 0.75, position: "relative", minHeight: 28, display: "flex", alignItems: "center" }}>À risque</div>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 18, position: "relative" }}>{aRisqueCount}</div>
+            </div>
+            <div className="rv-glass-card" style={{ flex: 1, minWidth: 0 }}>
+              <div className="rv-glass-shine" />
+              <div style={{ fontSize: 10.5, opacity: 0.75, position: "relative", minHeight: 28, display: "flex", alignItems: "center" }}>Taux livraison</div>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 18, position: "relative" }}>{tauxLivraison}%</div>
+            </div>
+            <div className="rv-glass-card" style={{ flex: 1, minWidth: 0 }}>
+              <div className="rv-glass-shine" />
+              <div style={{ fontSize: 10.5, opacity: 0.75, position: "relative", minHeight: 28, display: "flex", alignItems: "center" }}>Total</div>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 18, position: "relative" }}>{commandesInRange.length}</div>
+            </div>
+          </div>
+
+          {(workspace.role === "owner" || workspace.role === "admin") && (
+            <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
+              <button onClick={() => setShowLivreurs(true)} style={{ background: "rgba(255,255,255,0.15)", border: "none", color: "white", borderRadius: 8, padding: "8px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>
+                🚚 Livreurs
+              </button>
+              <button onClick={() => setShowClosers(true)} style={{ background: "rgba(255,255,255,0.15)", border: "none", color: "white", borderRadius: 8, padding: "8px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>
+                🎧 Closers
+              </button>
+              <button onClick={() => setShowCampagne(true)} style={{ background: "rgba(255,255,255,0.15)", border: "none", color: "white", borderRadius: 8, padding: "8px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>
+                📣 Campagne
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {(workspace.role === "owner" || workspace.role === "admin") && (
+        <ResumeIntelligent
+          todoAujourdhui={todoAujourdhui}
+          clientsARelancer={clientsARelancer}
+          produitStockCritique={produitStockCritique}
+          meilleurLivreur={meilleurLivreur}
+          beneficeReel={beneficeReel}
+          currency={workspace.currency}
+          onVoirAujourdhui={() => setVue("aujourdhui")}
+        />
+      )}
+
+      <div style={{ padding: "0 20px 8px" }}>
+      {retourPaiement && (
+        <div style={{ background: "#EAF3DE", border: "1px solid #C7DDA3", borderRadius: 12, padding: "12px 14px", marginBottom: 16, fontSize: 13, color: "#3B6D11" }}>
+          ✅ Paiement reçu ! Ton abonnement s'active automatiquement, ça peut prendre quelques instants.
+        </div>
+      )}
+      <SubscriptionBanner subscription={subscription} />
+
+      {notifPermission === "default" && (
+        <div style={{ background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 12, padding: "12px 14px", marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12.5, color: "#8A6412" }}>🔔 Active les notifications pour ne rater aucune commande, même l'app fermée.</span>
+          <button onClick={activerNotificationsPush} style={{ background: "#e8920a", color: "white", border: "none", borderRadius: 8, padding: "7px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer", flexShrink: 0 }}>
+            Activer
+          </button>
+        </div>
+      )}
+
+      {(vue === "commandes" || vue === "compta") && (
+        <div style={{ display: "flex", gap: 6, overflowX: "auto", marginBottom: 12, paddingBottom: 2 }}>
+          {[
+            { key: "aujourdhui", label: "Aujourd'hui" },
+            { key: "hier", label: "Hier" },
+            { key: "semaine", label: "Cette semaine" },
+            { key: "mois", label: "Ce mois" },
+            { key: "personnalise", label: "Personnalisé" },
+          ].map((d) => (
+            <button
+              key={d.key}
+              onClick={() => setDatePreset(d.key)}
+              style={{ padding: "6px 12px", borderRadius: 999, border: `1px solid ${datePreset === d.key ? "#1a7a3c" : "#DDD8CC"}`, background: datePreset === d.key ? "#1a7a3c" : "white", color: datePreset === d.key ? "white" : "#16231F", fontSize: 12, fontWeight: 500, whiteSpace: "nowrap", cursor: "pointer" }}
+            >
+              {d.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {vue === "commandes" && datePreset === "personnalise" && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
+          <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} style={{ flex: 1, padding: "7px 9px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 12.5 }} />
+          <span style={{ color: "#8A9089", fontSize: 12 }}>à</span>
+          <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} style={{ flex: 1, padding: "7px 9px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 12.5 }} />
+        </div>
+      )}
+
+      {vue === "aujourdhui" && (
+        <div>
+          {commandes.length === 0 && (
+            <div style={{ background: "linear-gradient(135deg, #16231F, #1e2f28)", borderRadius: 16, padding: "20px 18px", marginBottom: 20 }}>
+              <div style={{ color: "white", fontWeight: 700, fontSize: 16, marginBottom: 4 }}>👋 Bienvenue sur RecuVente !</div>
+              <div style={{ color: "rgba(255,255,255,0.7)", fontSize: 12.5, marginBottom: 16 }}>3 étapes pour bien démarrer.</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {[
+                  { n: "1", titre: "Ajoute ta première commande", desc: "Manuellement, ou connecte Shopify", action: () => setShowAdd(true), bouton: "+ Ajouter" },
+                  { n: "2", titre: "Invite ton équipe", desc: "Livreurs, closers, comptable", action: () => setShowTeam(true), bouton: "Inviter" },
+                  { n: "3", titre: "Connecte Shopify (optionnel)", desc: "Les commandes arriveront toutes seules", action: () => setShowIntegrations(true), bouton: "Voir" },
+                ].map((etape) => (
+                  <div key={etape.n} style={{ background: "rgba(255,255,255,0.06)", borderRadius: 12, padding: "12px 14px", display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ width: 26, height: 26, borderRadius: "50%", background: "rgba(255,255,255,0.12)", color: "white", fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      {etape.n}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ color: "white", fontWeight: 600, fontSize: 13 }}>{etape.titre}</div>
+                      <div style={{ color: "rgba(255,255,255,0.55)", fontSize: 11 }}>{etape.desc}</div>
+                    </div>
+                    <button onClick={etape.action} style={{ background: "rgba(255,255,255,0.14)", color: "white", border: "none", borderRadius: 7, padding: "6px 12px", fontSize: 11.5, fontWeight: 600, cursor: "pointer", flexShrink: 0 }}>
+                      {etape.bouton}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+            <div style={{ fontWeight: 700, fontSize: 17 }}>Aujourd'hui</div>
+            {todoAujourdhui.total > 0 && (
+              <button onClick={() => setShowBatch(true)} style={{ background: "#1a7a3c", color: "white", border: "none", borderRadius: 8, padding: "7px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                📢 Relancer tout
+              </button>
+            )}
+          </div>
+          <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 14 }}>
+            {todoAujourdhui.total > 0 ? `${todoAujourdhui.total} commande${todoAujourdhui.total > 1 ? "s" : ""} à traiter` : "Rien à traiter, tout est à jour ✅"}
+          </div>
+
+          {(todoAujourdhui.argentARisque > 0 || todoAujourdhui.argentRecuperable > 0) && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
+              <div style={{ background: "#FBEAE6", border: "1px solid #F0B8AC", borderRadius: 12, padding: "12px 14px" }}>
+                <div style={{ fontSize: 10.5, color: "#B23A22", textTransform: "uppercase", fontWeight: 600 }}>💸 Argent à risque</div>
+                <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 18, marginTop: 3, color: "#D64933" }}>{todoAujourdhui.argentARisque.toLocaleString("fr-FR")} {workspace.currency}</div>
+              </div>
+              <div style={{ background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 12, padding: "12px 14px" }}>
+                <div style={{ fontSize: 10.5, color: "#8A6412", textTransform: "uppercase", fontWeight: 600 }}>♻️ Récupérable</div>
+                <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 18, marginTop: 3, color: "#8A6412" }}>{todoAujourdhui.argentRecuperable.toLocaleString("fr-FR")} {workspace.currency}</div>
+              </div>
+            </div>
+          )}
+
+          {todoAujourdhui.total === 0 && (
+            <div style={{ textAlign: "center", padding: "40px 20px", color: "#8A9089" }}>
+              <div style={{ fontSize: 36, marginBottom: 10 }}>🎉</div>
+              <div style={{ fontSize: 14 }}>Aucune commande urgente pour le moment.</div>
+            </div>
+          )}
+
+          {[
+            { key: "aRelivrer", title: "📅 À relivrer aujourd'hui", items: todoAujourdhui.aRelivrer, color: "#1a7a3c" },
+            { key: "jamaisContactees", title: "🆕 Jamais contactées", items: todoAujourdhui.jamaisContactees, color: "#8A6412" },
+            { key: "sansNouvelles", title: "⏰ Sans nouvelles depuis 24h+", items: todoAujourdhui.sansNouvelles, color: "#D64933" },
+          ].map((sec) => sec.items.length > 0 && (
+            <div key={sec.key} style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: sec.color, marginBottom: 8 }}>{sec.title} ({sec.items.length})</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {sec.items.map((c, i) => (
+                  <div key={c.id} style={{ background: "white", border: "1px solid #ECE8DC", borderLeft: `4px solid ${sec.color}`, borderRadius: 10, padding: "12px 14px", display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ width: 20, height: 20, borderRadius: "50%", background: i === 0 ? sec.color : "#ECE8DC", color: i === 0 ? "white" : "#8A9089", fontSize: 10.5, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      {i + 1}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 600, fontSize: 14 }}>{c.client}</div>
+                      <div style={{ fontSize: 12, color: "#6B7168" }}>{c.produit} · {c.tel}</div>
+                    </div>
+                    <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 14 }}>{Number(c.montant).toLocaleString("fr-FR")} {workspace.currency}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {vue === "commandes" && (
+      <>
+      {accesBloque && (
+        <div style={{ background: "#FBEAE6", border: "1px solid #F0B8AC", borderRadius: 12, padding: "12px 14px", marginBottom: 16, fontSize: 13, color: "#D64933" }}>
+          🔒 Impossible d'ajouter de nouvelles commandes tant que l'abonnement n'est pas actif. Tes données existantes restent accessibles et en sécurité.
+        </div>
+      )}
+
+      {quotaAtteint && (
+        <div style={{ background: "#FBEAE6", border: "1px solid #F0B8AC", borderRadius: 12, padding: "12px 14px", marginBottom: 16, fontSize: 13, color: "#D64933" }}>
+          🔒 Quota du plan atteint ({commandesCeMois}/{maxCommandesMois} commandes ce mois-ci). Passe à un plan supérieur pour continuer.
+        </div>
+      )}
+
+      {!accesBloque && !quotaAtteint && maxCommandesMois !== null && (
+        <div style={{ fontSize: 11.5, color: "#8A9089", marginBottom: 10 }}>
+          {commandesCeMois} / {maxCommandesMois} commandes utilisées ce mois-ci
+        </div>
+      )}
+
+      {commandesInRange.length > 0 && (
+        <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 14, padding: "16px 18px", marginBottom: 16, display: "flex", alignItems: "center", gap: 20 }}>
+          <StatusDonutSaas
+            livrees={commandesInRange.filter((c) => c.statut === "confirmee").length}
+            enAttente={commandesInRange.filter((c) => c.statut === "en_cours").length}
+            echouees={commandesInRange.filter((c) => c.statut === "echouee").length}
+          />
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+              <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#1F9D6E", display: "inline-block" }} />
+              Confirmées <span style={{ marginLeft: "auto", fontWeight: 600 }}>{commandesInRange.filter((c) => c.statut === "confirmee").length}</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+              <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#E8A93D", display: "inline-block" }} />
+              En cours <span style={{ marginLeft: "auto", fontWeight: 600 }}>{commandesInRange.filter((c) => c.statut === "en_cours").length}</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+              <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#D64933", display: "inline-block" }} />
+              Échouées <span style={{ marginLeft: "auto", fontWeight: 600 }}>{commandesInRange.filter((c) => c.statut === "echouee").length}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {evolutionData.length > 1 && (
+        <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 14, padding: "18px 20px 14px", marginBottom: 16 }}>
+          <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>Évolution des commandes</div>
+          <EvolutionChartSaas data={evolutionData} />
+        </div>
+      )}
+
+      {(meilleurProduit || meilleurLivreur) && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+          {meilleurProduit && (
+            <div style={{ background: "#EAF3DE", border: "1px solid #C7DDA3", borderRadius: 12, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 12.5, color: "#3B6D11" }}>🏆 Produit le plus vendu</span>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: "#3B6D11" }}>{meilleurProduit.nom} ({meilleurProduit.ventes})</span>
+            </div>
+          )}
+          {produitPlusRentable && produitPlusRentable.nom !== meilleurProduit?.nom && (
+            <div style={{ background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 12, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 12.5, color: "#8A6412" }}>💰 Produit le plus rentable</span>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: "#8A6412" }}>{produitPlusRentable.nom}</span>
+            </div>
+          )}
+          {meilleurLivreur && meilleurLivreur.total > 0 && (
+            <div style={{ background: "#EAF7F1", border: "1px solid #C7E8D6", borderRadius: 12, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 12.5, color: "#1F9D6E" }}>🚀 Livreur le plus performant</span>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: "#1F9D6E" }}>{meilleurLivreur.nom} ({meilleurLivreur.taux}%)</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {clientsSuspects.length > 0 && (
+        <div style={{ background: "#FBEAE6", border: "1px solid #F0B8AC", borderRadius: 12, padding: "12px 14px", marginBottom: 16 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: "#D64933", marginBottom: 6 }}>⚠️ {clientsSuspects.length} client{clientsSuspects.length > 1 ? "s" : ""} avec 3+ échecs</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {clientsSuspects.slice(0, 5).map((c, i) => (
+              <div key={i} style={{ fontSize: 12, color: "#B23A22" }}>
+                <strong>{c.nom}</strong> ({c.tel}) — {c.echouees} échec{c.echouees > 1 ? "s" : ""} sur {c.total} commande{c.total > 1 ? "s" : ""}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {anomaliesProduitZone.length > 0 && (
+        <div style={{ background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 12, padding: "12px 14px", marginBottom: 16 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: "#8A6412", marginBottom: 8 }}>
+            📍 {anomaliesProduitZone.length} produit{anomaliesProduitZone.length > 1 ? "s" : ""} échoue{anomaliesProduitZone.length > 1 ? "nt" : ""} anormalement dans une zone précise
+          </div>
+          {anomaliesProduitZone.slice(0, 3).map((a, i) => (
+            <div key={i} style={{ fontSize: 12, color: "#8A6412", marginBottom: 3 }}>
+              <strong>{a.produit}</strong> à <strong>{a.zone}</strong> — {a.tauxLocal}% d'échec ici (contre {a.tauxGlobal}% ailleurs, sur {a.total} commandes)
+            </div>
+          ))}
+          <div style={{ fontSize: 10.5, color: "#8A6412", marginTop: 4, opacity: 0.8 }}>
+            Vérifie l'adresse, le livreur assigné, ou la disponibilité du produit dans cette zone.
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        <input
+          type="text"
+          value={recherche}
+          onChange={(e) => setRecherche(e.target.value)}
+          placeholder="Rechercher un client ou numéro..."
+          style={{ flex: 1, padding: "9px 12px", borderRadius: 9, border: "1px solid #DDD8CC", fontSize: 13.5, background: "white", boxSizing: "border-box" }}
+        />
+        <button
+          onClick={exportCSV}
+          style={{ background: "white", border: "1px solid #DDD8CC", borderRadius: 9, padding: "0 13px", color: "#1a7a3c", fontWeight: 600, fontSize: 12.5, whiteSpace: "nowrap", cursor: "pointer" }}
+        >
+          Exporter
+        </button>
+      </div>
+
+      <div style={{ display: "flex", gap: 6, marginBottom: 14, overflowX: "auto" }}>
+        {[
+          { key: "toutes", label: "Toutes" },
+          { key: "echouee", label: "Échouées" },
+          { key: "en_cours", label: "En cours" },
+          { key: "confirmee", label: "Confirmées" },
+        ].map((f) => (
+          <button
+            key={f.key}
+            onClick={() => setFilterStatut(f.key)}
+            style={{ padding: "7px 14px", borderRadius: 999, border: `1px solid ${filterStatut === f.key ? "#1a7a3c" : "#DDD8CC"}`, background: filterStatut === f.key ? "#1a7a3c" : "white", color: filterStatut === f.key ? "white" : "#16231F", fontSize: 12.5, fontWeight: 500, whiteSpace: "nowrap", cursor: "pointer" }}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <div style={{ fontWeight: 700, fontSize: 17 }}>Commandes ({commandesAffichees.length})</div>
+        <button
+          onClick={() => !accesBloque && !quotaAtteint && setShowAdd(true)}
+          disabled={accesBloque || quotaAtteint}
+          style={{ ...btnStyle, width: "auto", padding: "8px 16px", opacity: (accesBloque || quotaAtteint) ? 0.4 : 1, cursor: (accesBloque || quotaAtteint) ? "not-allowed" : "pointer" }}
+        >
+          + Ajouter
+        </button>
+      </div>
+
+      {!loaded && <div style={{ color: "#8A9089", fontSize: 13 }}>Chargement...</div>}
+      {loaded && commandes.length === 0 && (
+        <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: 20, textAlign: "center", color: "#8A9089", fontSize: 13 }}>
+          Aucune commande. Ajoute la première pour tester.
+        </div>
+      )}
+
+      {commandesAffichees.length === 0 && commandes.length > 0 && (
+        <div style={{ textAlign: "center", padding: "30px 0", color: "#8A9089", fontSize: 13 }}>Aucune commande ne correspond.</div>
+      )}
+
+      {groupedByDay.map((group, gi) => (
+        <div key={gi} style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: "#1a7a3c", textTransform: "capitalize", padding: "8px 2px" }}>
+            {group.label} <span style={{ color: "#8A9089", fontWeight: 500 }}>({group.orders.length})</span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {group.orders.map((c) => (
+              <CommandeCard key={c.id} commande={c} currency={workspace.currency} onStatusChanged={loadCommandes} livreurs={livreurs} closers={closers} onAssignLivreur={assignLivreur} onAssignCloser={assignCloser} workspace={workspace} confirmateurNom={session.user.email.split("@")[0]} onCelebrate={(montant, client) => { setCelebration({ montant, client }); playCelebrationSound(); setTimeout(() => setCelebration(null), 2600); }} />
+            ))}
+          </div>
+        </div>
+      ))}
+      </>
+      )}
+
+      {vue === "validations" && (
+        <ValidationsViewSaas commandes={commandes} currency={workspace.currency} />
+      )}
+
+      {vue === "produits_vue" && (
+        <ProduitsViewSaas
+          produitsAvecBenefice={produitsAvecBenefice}
+          currency={workspace.currency}
+          onGererCatalogue={() => setShowProduits(true)}
+        />
+      )}
+
+      {vue === "clients" && (
+        <div>
+          {clientsARelancer.length > 0 && (
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: "#1a7a3c", marginBottom: 3 }}>🔄 Clients à relancer pour réachat ({clientsARelancer.length})</div>
+              <div style={{ fontSize: 11.5, color: "#8A9089", marginBottom: 8 }}>Basé sur leur rythme d'achat habituel.</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {clientsARelancer.slice(0, 10).map((c, i) => (
+                  <a
+                    key={i}
+                    href={`https://wa.me/${cleanPhoneForWhatsApp(c.tel)}?text=${encodeURIComponent(`Bonjour ${(c.nom || "").split(" ")[0]} 👋, ça faisait un moment ! Seriez-vous intéressé(e) pour recommander chez ${workspace.name} ?`)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ background: "white", border: "1px solid #ECE8DC", borderLeft: "4px solid #1a7a3c", borderRadius: 10, padding: "10px 12px", display: "block", textDecoration: "none", color: "inherit" }}
+                  >
+                    <div style={{ fontWeight: 600, fontSize: 13.5 }}>{c.nom}</div>
+                    <div style={{ fontSize: 11.5, color: "#6B7168" }}>Achète en général tous les {c.intervalleMoyen}j · dernier achat il y a {c.joursDepuisDernier}j</div>
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {clients.length === 0 && <div style={{ color: "#8A9089", fontSize: 13, textAlign: "center", padding: "30px 0" }}>Aucun client pour l'instant.</div>}
+            {clients.map((cl, i) => (
+              <div key={i} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 10, padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 14, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                    {i < 3 && cl.montantTotal > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: "#e8920a", background: "#FBF3E3", padding: "1px 7px", borderRadius: 999 }}>🏆 TOP CLIENT</span>}
+                    {cl.joursDeRetard !== null && cl.joursDeRetard >= 0 && <span style={{ fontSize: 10, fontWeight: 700, color: "#1a7a3c", background: "#EAF3DE", padding: "1px 7px", borderRadius: 999 }}>🔄</span>}
+                    {cl.nom}
+                  </div>
+                  <div style={{ fontSize: 12, color: "#6B7168" }}>{cl.tel} · {cl.zone}</div>
+                  <div style={{ fontSize: 11.5, marginTop: 3, display: "flex", gap: 8 }}>
+                    <span style={{ color: "#1a7a3c" }}>{cl.confirmees} confirmée{cl.confirmees > 1 ? "s" : ""}</span>
+                    {cl.echouees > 0 && <span style={{ color: "#D64933" }}>{cl.echouees} échouée{cl.echouees > 1 ? "s" : ""}</span>}
+                  </div>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: "#1a7a3c" }}>{cl.montantTotal.toLocaleString("fr-FR")} {workspace.currency}</div>
+                  <div style={{ fontSize: 10.5, color: "#8A9089" }}>{cl.total} commande{cl.total > 1 ? "s" : ""}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {vue === "compta" && (
+        <div>
+          <div style={{ display: "inline-block", fontSize: 11, fontWeight: 600, color: "#1a7a3c", background: "#EAF3DE", padding: "3px 10px", borderRadius: 999, marginBottom: 12 }}>
+            📊 {periodLabel}
+          </div>
+          <div style={{ background: "linear-gradient(135deg, #16231F, #1e2f28)", borderRadius: 14, padding: "16px 18px", marginBottom: 12 }}>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.65)", textTransform: "uppercase" }}>💰 Bénéfice réel</div>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 24, color: beneficeReel >= 0 ? "#7fd6a3" : "#f0a0a0", marginTop: 3 }}>
+              {beneficeReel.toLocaleString("fr-FR")} {workspace.currency}
+            </div>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", marginTop: 4 }}>
+              CA confirmé {caConfirme.toLocaleString("fr-FR")} − Livraisons ({confirmees.length} × {COUT_LIVRAISON.toLocaleString("fr-FR")}) − Produits ({coutProduitsInfo.coutTotal.toLocaleString("fr-FR")})
+            </div>
+          </div>
+
+          {coutProduitsInfo.nbInconnu > 0 && (
+            <div style={{ background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 10, padding: "10px 12px", marginBottom: 12, fontSize: 12, color: "#8A6412" }}>
+              ⚠️ {coutProduitsInfo.nbInconnu} commande{coutProduitsInfo.nbInconnu > 1 ? "s" : ""} ({coutProduitsInfo.montantInconnu.toLocaleString("fr-FR")} {workspace.currency}) sans coût produit connu — non déduites, bénéfice sous-estimé.
+              <button onClick={() => setShowProduits(true)} style={{ display: "block", marginTop: 6, background: "#1a7a3c", color: "white", border: "none", borderRadius: 6, padding: "5px 10px", fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}>
+                📦 Renseigner le catalogue
+              </button>
+            </div>
+          )}
+
+          <button onClick={() => setShowProduits(true)} style={{ width: "100%", background: "white", border: "1px solid #DDD8CC", borderRadius: 10, padding: "10px 0", fontSize: 13, fontWeight: 600, color: "#16231F", cursor: "pointer", marginBottom: 16 }}>
+            📦 Gérer le catalogue produits ({produits.length})
+          </button>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
+            <div style={{ background: "linear-gradient(135deg, #16231F, #1e2f28)", borderRadius: 14, padding: "14px 16px" }}>
+              <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.65)", textTransform: "uppercase" }}>💵 À payer aux livreurs</div>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 18, color: "#e8920a", marginTop: 3 }}>{totalCommission.toLocaleString("fr-FR")} {workspace.currency}</div>
+            </div>
+            <div style={{ background: "linear-gradient(135deg, #1a7a3c, #1F9D6E)", borderRadius: 14, padding: "14px 16px" }}>
+              <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.75)", textTransform: "uppercase" }}>🏦 Dépôt attendu</div>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 18, color: "white", marginTop: 3 }}>{totalADeposer.toLocaleString("fr-FR")} {workspace.currency}</div>
+            </div>
+          </div>
+
+          {livreurs.some((l) => l.en_tournee) && (
+            <div style={{ marginBottom: 16 }}>
+              <CarteLivreursSaas livreurs={livreurs} />
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {livreurs.filter((l) => l.en_tournee).map((l) => (
+                  <div key={l.id} style={{ background: "#EAF3DE", border: "1px solid #C7DDA3", borderRadius: 10, padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontWeight: 600, fontSize: 13.5 }}>{l.nom}</span>
+                    {!l.position_lat && (
+                      <span style={{ fontSize: 11.5, color: "#8A9089" }}>Position en attente...</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10 }}>Détail par livreur</div>
+          {depotsParLivreur.length === 0 && <div style={{ color: "#8A9089", fontSize: 13 }}>Aucune livraison confirmée pour l'instant.</div>}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {depotsParLivreur.map((l) => (
+              <div key={l.nom} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 10, padding: "12px 14px" }}>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>{l.nom}</div>
+                <div style={{ fontSize: 11.5, color: "#6B7168", marginTop: 2 }}>{l.livrees} livraison{l.livrees > 1 ? "s" : ""} · {l.montantRecupere.toLocaleString("fr-FR")} {workspace.currency} encaissé</div>
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <div style={{ flex: 1, background: "#FBF3E3", borderRadius: 7, padding: "6px 9px", fontSize: 11, color: "#8A6412" }}>
+                    Commission : <strong>{l.commission.toLocaleString("fr-FR")}</strong>
+                  </div>
+                  <div style={{ flex: 1, background: "#EAF3DE", borderRadius: 7, padding: "6px 9px", fontSize: 11, color: "#3B6D11" }}>
+                    À déposer : <strong>{l.aDeposer.toLocaleString("fr-FR")}</strong>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {livreursAvecCommandes.length > 0 && (
+            <div style={{ marginTop: 20 }}>
+              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10 }}>📊 Résumé — commandes reçues par livreur ({periodLabel})</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {livreursAvecCommandes.map((l) => (
+                  <div key={l.nom} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 8, padding: "9px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 13 }}><strong>{l.nom}</strong> a reçu</span>
+                    <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 14, color: "#1a7a3c" }}>{l.total} commande{l.total > 1 ? "s" : ""}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {repartitionCloserLivreur.length > 0 && (
+            <div style={{ marginTop: 20 }}>
+              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10 }}>🔄 Répartition Closer → Livreur ({periodLabel})</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {repartitionCloserLivreur.map((r, i) => (
+                  <RepartitionLigne key={i} r={r} />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      </div>
+      </div>
+
+      <div
+        className="rv-saas-bottomnav"
+        style={{
+          position: "fixed",
+          bottom: 0,
+          left: 0,
+          right: 0,
+          background: "white",
+          borderTop: "1px solid #ECE8DC",
+          padding: "8px 12px",
+          paddingBottom: "calc(8px + env(safe-area-inset-bottom))",
+          zIndex: 20,
+        }}
+      >
+        {[
+          { key: "aujourdhui", label: "Aujourd'hui", icon: ListChecks },
+          { key: "commandes", label: "Commandes", icon: Package },
+          { key: "validations", label: "Validations", icon: CheckCheck },
+          { key: "clients", label: "Clients", icon: Users },
+          ...(workspace.role === "owner" || workspace.role === "admin" ? [{ key: "produits_vue", label: "Produits", icon: Boxes }] : []),
+          ...(workspace.role === "owner" || workspace.role === "admin" ? [{ key: "compta", label: "Compta", icon: Calculator }] : []),
+        ].map((t) => {
+          const Icon = t.icon;
+          const active = vue === t.key;
+          return (
+            <button
+              key={t.key}
+              onClick={() => setVue(t.key)}
+              style={{
+                flex: 1,
+                background: "none",
+                border: "none",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 3,
+                padding: "6px 0",
+                color: active ? "#1a7a3c" : "#8A9089",
+                cursor: "pointer",
+              }}
+            >
+              <Icon size={19} strokeWidth={active ? 2.4 : 2} />
+              <span style={{ fontSize: 10, fontWeight: active ? 600 : 500 }}>{t.label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {toastNouvellesCommandes && (
+        <div style={{ position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)", background: "#16231F", color: "white", padding: "11px 20px", borderRadius: 999, fontSize: 13, fontWeight: 600, zIndex: 90, boxShadow: "0 6px 20px rgba(0,0,0,0.25)" }}>
+          {toastNouvellesCommandes}
+        </div>
+      )}
+      {celebration && <CelebrationOverlaySaas montant={celebration.montant} client={celebration.client} currency={workspace.currency} />}
+      {showAdd && <AddCommandeModal onClose={() => setShowAdd(false)} onAdd={addCommande} currency={workspace.currency} activityType={workspace.activity_type} />}
+      {showTeam && <TeamModal workspace={workspace} onClose={() => setShowTeam(false)} />}
+      {showAbonnement && <AbonnementModal workspace={workspace} subscription={subscription} onClose={() => setShowAbonnement(false)} />}
+      {showCampagne && <CampagneModalSaas clients={clients} workspace={workspace} onClose={() => setShowCampagne(false)} />}
+      {showIntegrations && <IntegrationsModal workspace={workspace} onClose={() => setShowIntegrations(false)} />}
+      {showAide && <AideModal onClose={() => setShowAide(false)} />}
+      {showBatch && (
+        <BatchRelanceModalSaas
+          orders={[...todoAujourdhui.aRelivrer, ...todoAujourdhui.jamaisContactees, ...todoAujourdhui.sansNouvelles]}
+          currency={workspace.currency}
+          onClose={() => setShowBatch(false)}
+          onLog={async (commandeId, note) => {
+            await supabase.from("relances").insert([{ commande_id: commandeId, note }]);
+            await loadAllRelances();
+          }}
+        />
+      )}
+      {showLivreurs && <EquipeModal titre="Livreurs" items={livreurs} onAdd={addLivreur} onDelete={deleteLivreur} onClose={() => setShowLivreurs(false)} avecEmail />}
+      {showClosers && <EquipeModal titre="Closers" items={closers} onAdd={addCloser} onDelete={deleteCloser} onClose={() => setShowClosers(false)} avecEmail />}
+      {showProduits && <ProduitsModal produits={produits} onAdd={addProduit} onUpdateCout={updateProduitCout} onUpdateStock={updateProduitStock} onUpdatePrixVente={updateProduitPrixVente} onUpdatePhoto={updateProduitPhoto} onUpdateDescription={updateProduitDescription} onUpdateGalerie={updateProduitGalerie} quantitesParProduit={quantitesParProduit} onDelete={deleteProduit} currency={workspace.currency} workspaceId={workspace.id} onImportCSV={importerProduitsCSV} onClose={() => setShowProduits(false)} />}
+      {showAvis && <AvisModal workspaceId={workspace.id} onClose={() => setShowAvis(false)} />}
+      {showCollections && <CollectionsModal workspaceId={workspace.id} produits={produits} onClose={() => setShowCollections(false)} />}
+    </div>
+  );
+}
+
+function AddCommandeModal({ onClose, onAdd, currency, activityType }) {
+  const estRetail = activityType === "retail";
+  const champs = estRetail ? ["client", "tel", "produit", "montant"] : ["client", "tel", "produit", "montant", "zone"];
+  const [form, setForm] = useState({ client: "", tel: "", produit: "", montant: "", zone: "", mode_vente: estRetail ? "sur_place" : "livraison", montant_paye: "", ville_expedition: "" });
+  const [modeRapide, setModeRapide] = useState(false);
+  const montantValide = Number(form.montant) > 0;
+  const canSubmit = form.client.trim() && montantValide;
+  const montantPayeValide = form.montant_paye === "" || Number(form.montant_paye) <= Number(form.montant || 0);
+  const champsRapides = ["client", "tel", "produit", "montant"];
+  const inputRefs = useRef({});
+
+  function focusNext(index) {
+    const nextField = champsRapides[index + 1];
+    if (nextField && inputRefs.current[nextField]) {
+      inputRefs.current[nextField].focus();
+    } else if (!nextField) {
+      if (form.client.trim() && montantValide) onAdd({ ...form, mode_vente: "sur_place", montant_paye: "" });
+    }
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "white", borderRadius: 16, padding: 24, width: "100%", maxWidth: 360, maxHeight: "88vh", overflowY: "auto" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+          <div style={{ fontWeight: 700, fontSize: 18 }}>{estRetail ? "Nouvelle vente" : "Nouvelle commande"}</div>
+          <button
+            onClick={() => setModeRapide(!modeRapide)}
+            style={{ background: modeRapide ? "#1a7a3c" : "#EEF0EA", color: modeRapide ? "white" : "#16231F", border: "none", borderRadius: 20, padding: "5px 12px", fontSize: 11.5, fontWeight: 700, cursor: "pointer" }}
+          >
+            ⚡ Rapide
+          </button>
+        </div>
+
+        {modeRapide ? (
+          <>
+            <div style={{ fontSize: 11.5, color: "#6B7168", marginBottom: 14 }}>Tape, appuie sur Entrée pour passer au champ suivant.</div>
+            {champsRapides.map((f, i) => (
+              <input
+                key={f}
+                ref={(el) => (inputRefs.current[f] = el)}
+                autoFocus={i === 0}
+                placeholder={f === "montant" ? `Montant (${currency})` : f === "produit" ? "Produit" : f === "tel" ? "Téléphone" : "Nom du client"}
+                value={form[f]}
+                onChange={(e) => setForm({ ...form, [f]: e.target.value })}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); focusNext(i); } }}
+                type={f === "montant" ? "number" : "text"}
+                min={f === "montant" ? "1" : undefined}
+                style={inputStyle}
+              />
+            ))}
+            {form.montant && !montantValide && (
+              <div style={{ color: "#D64933", fontSize: 12, marginTop: -6, marginBottom: 10 }}>Le montant doit être supérieur à 0.</div>
+            )}
+            <button onClick={() => canSubmit && onAdd({ ...form, mode_vente: "sur_place", montant_paye: "" })} disabled={!canSubmit} style={btnStyle}>
+              ⚡ Enregistrer
+            </button>
+          </>
+        ) : (
+          <>
+        {!estRetail && (
+          <>
+            <div style={{ fontSize: 12, color: "#6B7168", marginBottom: 14 }}>Comment ce colis part-il ?</div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+              <button
+                onClick={() => setForm({ ...form, mode_vente: "livraison" })}
+                style={{ flex: 1, padding: "10px 8px", borderRadius: 10, border: `2px solid ${form.mode_vente !== "expedition" ? "#1a7a3c" : "#DDD8CC"}`, background: form.mode_vente !== "expedition" ? "#EAF3DE" : "white", textAlign: "left", cursor: "pointer" }}
+              >
+                <div style={{ fontWeight: 700, fontSize: 12.5 }}>🏍️ Abidjan</div>
+                <div style={{ fontSize: 10.5, color: "#6B7168" }}>Livraison classique</div>
+              </button>
+              <button
+                onClick={() => setForm({ ...form, mode_vente: "expedition" })}
+                style={{ flex: 1, padding: "10px 8px", borderRadius: 10, border: `2px solid ${form.mode_vente === "expedition" ? "#2452E8" : "#DDD8CC"}`, background: form.mode_vente === "expedition" ? "#EAF0FB" : "white", textAlign: "left", cursor: "pointer" }}
+              >
+                <div style={{ fontWeight: 700, fontSize: 12.5 }}>📦 Expédition</div>
+                <div style={{ fontSize: 10.5, color: "#6B7168" }}>Hors Abidjan</div>
+              </button>
+            </div>
+            {form.mode_vente === "expedition" && (
+              <input
+                placeholder="Ville de destination"
+                value={form.ville_expedition}
+                onChange={(e) => setForm({ ...form, ville_expedition: e.target.value })}
+                style={inputStyle}
+              />
+            )}
+          </>
+        )}
+
+        {estRetail && (
+          <>
+            <div style={{ fontSize: 12, color: "#6B7168", marginBottom: 14 }}>Comment ce produit sort-il du magasin ?</div>
+            <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+              <button
+                onClick={() => setForm({ ...form, mode_vente: "sur_place" })}
+                style={{ flex: 1, padding: "10px 6px", borderRadius: 10, border: `2px solid ${form.mode_vente === "sur_place" ? "#1a7a3c" : "#DDD8CC"}`, background: form.mode_vente === "sur_place" ? "#EAF3DE" : "white", textAlign: "left", cursor: "pointer" }}
+              >
+                <div style={{ fontWeight: 700, fontSize: 12 }}>🏪 Sur place</div>
+                <div style={{ fontSize: 10, color: "#6B7168" }}>Retrait magasin</div>
+              </button>
+              <button
+                onClick={() => setForm({ ...form, mode_vente: "livraison" })}
+                style={{ flex: 1, padding: "10px 6px", borderRadius: 10, border: `2px solid ${form.mode_vente === "livraison" ? "#e8920a" : "#DDD8CC"}`, background: form.mode_vente === "livraison" ? "#FBF3E3" : "white", textAlign: "left", cursor: "pointer" }}
+              >
+                <div style={{ fontWeight: 700, fontSize: 12 }}>🚚 Livraison</div>
+                <div style={{ fontSize: 10, color: "#6B7168" }}>Livreur (Abidjan)</div>
+              </button>
+              <button
+                onClick={() => setForm({ ...form, mode_vente: "expedition" })}
+                style={{ flex: 1, padding: "10px 6px", borderRadius: 10, border: `2px solid ${form.mode_vente === "expedition" ? "#2452E8" : "#DDD8CC"}`, background: form.mode_vente === "expedition" ? "#EAF0FB" : "white", textAlign: "left", cursor: "pointer" }}
+              >
+                <div style={{ fontWeight: 700, fontSize: 12 }}>📦 Expédition</div>
+                <div style={{ fontSize: 10, color: "#6B7168" }}>Hors Abidjan</div>
+              </button>
+            </div>
+
+            {form.mode_vente === "expedition" && (
+              <input
+                placeholder="Ville de destination"
+                value={form.ville_expedition || ""}
+                onChange={(e) => setForm({ ...form, ville_expedition: e.target.value })}
+                style={inputStyle}
+              />
+            )}
+          </>
+        )}
+
+        {champs.map((f) => (
+          <input
+            key={f}
+            placeholder={f === "montant" ? `Montant total (${currency})` : f === "produit" && estRetail ? "Produit vendu" : f}
+            value={form[f]}
+            onChange={(e) => setForm({ ...form, [f]: e.target.value })}
+            type={f === "montant" ? "number" : "text"}
+            min={f === "montant" ? "1" : undefined}
+            style={inputStyle}
+          />
+        ))}
+        {form.montant && !montantValide && (
+          <div style={{ color: "#D64933", fontSize: 12, marginTop: -6, marginBottom: 10 }}>Le montant doit être supérieur à 0.</div>
+        )}
+
+        {estRetail && (
+          <div>
+            <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4 }}>Montant déjà payé (FCFA)</label>
+            <input
+              value={form.montant_paye}
+              onChange={(e) => setForm({ ...form, montant_paye: e.target.value })}
+              type="number"
+              placeholder={`Laisse vide si payé en entier (${form.montant || 0})`}
+              style={inputStyle}
+            />
+            {!montantPayeValide && (
+              <div style={{ color: "#D64933", fontSize: 11.5, marginTop: -6, marginBottom: 10 }}>Le montant payé ne peut pas dépasser le montant total.</div>
+            )}
+            <div style={{ fontSize: 11, color: "#8A9089", marginTop: -4, marginBottom: 10 }}>
+              Laisse vide ou égal au montant total si le client a payé en entier — sinon indique l'acompte reçu.
+            </div>
+          </div>
+        )}
+
+        <button onClick={() => canSubmit && montantPayeValide && onAdd(form)} disabled={!canSubmit || !montantPayeValide} style={btnStyle}>
+          {estRetail ? "Enregistrer la vente" : "Ajouter"}
+        </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const inputStyle = { width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, marginBottom: 10, boxSizing: "border-box" };
+const btnStyle = { width: "100%", padding: "12px 0", borderRadius: 10, border: "none", background: "#1a7a3c", color: "white", fontWeight: 700, fontSize: 14, cursor: "pointer" };
+
+function TeamModal({ workspace, onClose }) {
+  const [members, setMembers] = useState(null);
+  const [error, setError] = useState("");
+  const [showInvite, setShowInvite] = useState(false);
+  const [retraitEnCours, setRetraitEnCours] = useState(null);
+
+  async function loadMembers() {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const res = await fetch(`/api/team?workspaceId=${workspace.id}`, {
+      headers: { Authorization: `Bearer ${sessionData.session?.access_token}` },
+    });
+    const json = await res.json();
+    if (!res.ok) setError(json.error || "Erreur");
+    else setMembers(json.members);
+  }
+
+  useEffect(() => {
+    loadMembers();
+  }, []);
+
+  async function retirerMembre(memberUserId, email) {
+    if (!window.confirm(`Retirer ${email} de l'équipe ? Cette personne perdra immédiatement l'accès.`)) return;
+    setRetraitEnCours(memberUserId);
+    const { data: sessionData } = await supabase.auth.getSession();
+    const res = await fetch("/api/team", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionData.session?.access_token}` },
+      body: JSON.stringify({ action: "remove", workspaceId: workspace.id, memberUserId }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) alert(json.error || "Erreur lors du retrait");
+    else await loadMembers();
+    setRetraitEnCours(null);
+  }
+
+  const roleLabels = { owner: "Propriétaire", admin: "Admin", closer: "Closer", livreur: "Livreur", comptable: "Comptable" };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "white", borderRadius: 16, padding: 24, width: "100%", maxWidth: 400, maxHeight: "80vh", overflowY: "auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={{ fontWeight: 700, fontSize: 18 }}>Équipe</div>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer" }}>×</button>
+        </div>
+
+        <button onClick={() => setShowInvite(true)} style={{ ...btnStyle, marginBottom: 14 }}>
+          + Inviter quelqu'un
+        </button>
+
+        {error && <div style={{ color: "#D64933", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
+        {members === null && !error && <div style={{ color: "#8A9089", fontSize: 13 }}>Chargement...</div>}
+
+        {members && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {members.map((m) => (
+              <div key={m.id} style={{ background: "#FAFAF7", border: "1px solid #ECE8DC", borderRadius: 10, padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.email}</div>
+                  <div style={{ fontSize: 11.5, color: "#6B7168" }}>{roleLabels[m.role] || m.role}</div>
+                </div>
+                {m.role !== "owner" && (
+                  <button
+                    onClick={() => retirerMembre(m.user_id, m.email)}
+                    disabled={retraitEnCours === m.user_id}
+                    style={{ background: "none", border: "none", color: "#D64933", cursor: "pointer", fontSize: 12.5, flexShrink: 0 }}
+                  >
+                    {retraitEnCours === m.user_id ? "..." : "🗑️ Retirer"}
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {showInvite && (
+          <InviteMemberForm
+            workspace={workspace}
+            onClose={() => setShowInvite(false)}
+            onInvited={() => {
+              setShowInvite(false);
+              loadMembers();
+            }}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function InviteMemberForm({ workspace, onClose, onInvited }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [role, setRole] = useState("closer");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const roles = [
+    { key: "admin", label: "Admin — gestion opérationnelle" },
+    { key: "closer", label: "Closer — ses commandes" },
+    { key: "livreur", label: "Livreur — ses livraisons" },
+    { key: "comptable", label: "Comptable — lecture financière" },
+  ];
+
+  async function submit() {
+    if (!email || !password) {
+      setError("Remplis email et mot de passe.");
+      return;
+    }
+    setLoading(true);
+    setError("");
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const res = await fetch("/api/team", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionData.session?.access_token}` },
+        body: JSON.stringify({ action: "invite", workspaceId: workspace.id, email, password, role }),
+      });
+      const json = await res.json().catch(() => ({ error: `Réponse invalide du serveur (code ${res.status})` }));
+      if (!res.ok) setError(json.error || `Erreur (${res.status})`);
+      else {
+        if (json.compteExistant) {
+          alert(`✅ ${email} avait déjà un compte — il/elle a été ajouté(e) à ton équipe avec son mot de passe habituel (le mot de passe que tu as tapé n'a pas été utilisé).`);
+        }
+        onInvited();
+      }
+    } catch (e) {
+      setError("Erreur réseau: " + e.message);
+    }
+    setLoading(false);
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 55 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "white", borderRadius: 16, padding: 24, width: "100%", maxWidth: 340 }}>
+        <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 12 }}>Inviter quelqu'un</div>
+        <input placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} style={inputStyle} />
+        <input placeholder="Mot de passe temporaire" value={password} onChange={(e) => setPassword(e.target.value)} style={inputStyle} />
+        <div style={{ fontSize: 12, color: "#6B7168", marginBottom: 6 }}>Rôle</div>
+        <select value={role} onChange={(e) => setRole(e.target.value)} style={{ ...inputStyle, background: "white" }}>
+          {roles.map((r) => (
+            <option key={r.key} value={r.key}>{r.label}</option>
+          ))}
+        </select>
+        {error && <div style={{ color: "#D64933", fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
+        <button onClick={submit} disabled={loading} style={btnStyle}>
+          {loading ? "Création..." : "Créer le compte"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SubscriptionBanner({ subscription }) {
+  if (subscription === undefined) return null;
+
+  if (subscription === null) {
+    return (
+      <div style={{ background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 12, padding: "12px 14px", marginBottom: 16, fontSize: 13, color: "#8A6412" }}>
+        ⚠️ Aucun abonnement associé à cet espace (créé avant la mise en place du système d'essai).
+      </div>
+    );
+  }
+
+  const planNom = subscription.subscription_plans?.nom || "?";
+
+  if (subscription.status === "trial") {
+    const finEssai = new Date(subscription.trial_ends_at);
+    const joursRestants = Math.max(0, Math.floor((finEssai - new Date()) / 86400000));
+    const expire = joursRestants === 0;
+    return (
+      <div style={{ background: expire ? "#FBEAE6" : "#EAF3DE", border: `1px solid ${expire ? "#F0B8AC" : "#C7DDA3"}`, borderRadius: 12, padding: "12px 14px", marginBottom: 16, fontSize: 13, color: expire ? "#D64933" : "#3B6D11", fontWeight: 600 }}>
+        {expire
+          ? `⏰ Ton essai gratuit (${planNom}) est terminé.`
+          : `🎁 Essai gratuit — plan ${planNom} — ${joursRestants} jour${joursRestants > 1 ? "s" : ""} restant${joursRestants > 1 ? "s" : ""}.`}
+      </div>
+    );
+  }
+
+  if (subscription.status === "active") {
+    return (
+      <div style={{ background: "#EAF3DE", border: "1px solid #C7DDA3", borderRadius: 12, padding: "12px 14px", marginBottom: 16, fontSize: 13, color: "#3B6D11", fontWeight: 600 }}>
+        ✅ Abonnement actif — plan {planNom}
+      </div>
+    );
+  }
+
+  if (subscription.status === "suspended") {
+    return (
+      <div style={{ background: "#FBEAE6", border: "1px solid #F0B8AC", borderRadius: 12, padding: "12px 14px", marginBottom: 16, fontSize: 13, color: "#D64933", fontWeight: 600 }}>
+        🔴 Abonnement suspendu — contacte le support pour réactiver.
+      </div>
+    );
+  }
+
+  return null;
+}
+
+function AdminPanel({ session }) {
+  const [data, setData] = useState(undefined);
+  const [error, setError] = useState("");
+  const [debug, setDebug] = useState("");
+  const [recherche, setRecherche] = useState("");
+  const [actionEnCours, setActionEnCours] = useState(null);
+  const [exportEnCours, setExportEnCours] = useState(false);
+
+  async function exporterSauvegarde() {
+    setExportEnCours(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const res = await fetch("/api/backup-export", {
+        headers: { Authorization: `Bearer ${sessionData.session?.access_token}` },
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        alert(json.error || "Erreur lors de l'export");
+        setExportEnCours(false);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `recuvente-saas-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert("Erreur: " + e.message);
+    }
+    setExportEnCours(false);
+  }
+
+  async function load() {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const res = await fetch("/api/admin-workspaces", {
+      headers: { Authorization: `Bearer ${sessionData.session?.access_token}` },
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      setError(json.error || "Erreur");
+      setDebug(json.debug || "");
+    } else setData(json);
+  }
+
+  async function toggleStatus(workspaceId, action) {
+    setActionEnCours(workspaceId);
+    const { data: sessionData } = await supabase.auth.getSession();
+    const res = await fetch("/api/toggle-workspace-status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionData.session?.access_token}` },
+      body: JSON.stringify({ workspaceId, action }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) alert(json.error || "Erreur");
+    else await load();
+    setActionEnCours(null);
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  if (error) {
+    return (
+      <Centered>
+        <div style={{ textAlign: "center", maxWidth: 400, padding: 20 }}>
+          <div style={{ fontSize: 32, marginBottom: 10 }}>🔒</div>
+          <div style={{ color: "#D64933", fontWeight: 600 }}>{error}</div>
+          {debug && <div style={{ color: "#8A9089", fontSize: 12, marginTop: 12, wordBreak: "break-all" }}>{debug}</div>}
+        </div>
+      </Centered>
+    );
+  }
+
+  if (data === undefined) return <Centered>Chargement...</Centered>;
+
+  const statusLabels = { trial: "🎁 Essai", active: "✅ Actif", suspended: "🔴 Suspendu", cancelled: "Annulé" };
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#FAFAF7", fontFamily: "'IBM Plex Sans', sans-serif", padding: 24 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+        <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 22 }}>Admin RecuVente</div>
+        <a href="?" style={{ fontSize: 12.5, color: "#1a7a3c", textDecoration: "underline" }}>← Mon espace</a>
+      </div>
+      <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 12 }}>Connecté en tant que {session.user.email}</div>
+
+      <button
+        onClick={exporterSauvegarde}
+        disabled={exportEnCours}
+        style={{ background: "#16231F", color: "white", border: "none", borderRadius: 9, padding: "9px 16px", fontSize: 12.5, fontWeight: 600, cursor: "pointer", marginBottom: 20 }}
+      >
+        {exportEnCours ? "Export en cours..." : "💾 Télécharger une sauvegarde complète"}
+      </button>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 20 }}>
+        <div style={{ background: "#16231F", color: "white", borderRadius: 12, padding: 16 }}>
+          <div style={{ fontSize: 11, opacity: 0.7, textTransform: "uppercase" }}>MRR estimé</div>
+          <div style={{ fontSize: 20, fontWeight: 700, marginTop: 4, color: "#e8920a" }}>{data.mrr.toLocaleString("fr-FR")} XOF</div>
+        </div>
+        <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: 16 }}>
+          <div style={{ fontSize: 11, color: "#8A9089", textTransform: "uppercase" }}>Entreprises</div>
+          <div style={{ fontSize: 20, fontWeight: 700, marginTop: 4 }}>{data.total}</div>
+        </div>
+        <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: 16 }}>
+          <div style={{ fontSize: 11, color: "#8A9089", textTransform: "uppercase" }}>En essai / Actifs</div>
+          <div style={{ fontSize: 20, fontWeight: 700, marginTop: 4 }}>{data.enEssai} / {data.actifs}</div>
+        </div>
+      </div>
+
+      {data.demandes && data.demandes.length > 0 && (
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10, color: "#8A6412" }}>💰 Demandes de paiement en attente ({data.demandes.length})</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {data.demandes.map((d) => (
+              <DemandeCard key={d.id} demande={d} onConfirmed={load} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+        <div style={{ fontWeight: 700, fontSize: 15 }}>Toutes les entreprises</div>
+        <input
+          type="text"
+          placeholder="Rechercher..."
+          value={recherche}
+          onChange={(e) => setRecherche(e.target.value)}
+          style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 12.5, width: 160 }}
+        />
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {data.workspaces
+          .filter((ws) => !recherche.trim() || ws.name.toLowerCase().includes(recherche.toLowerCase()) || ws.ownerEmail.toLowerCase().includes(recherche.toLowerCase()))
+          .map((ws) => {
+            const suspendu = ws.subscription?.status === "suspended";
+            const enEssai = ws.subscription?.status === "trial";
+            let joursRestants = null;
+            let essaiExpire = false;
+            if (enEssai && ws.subscription?.trial_ends_at) {
+              const finEssai = new Date(ws.subscription.trial_ends_at);
+              joursRestants = Math.floor((finEssai - new Date()) / 86400000);
+              essaiExpire = joursRestants < 0;
+            }
+            return (
+              <div key={ws.id} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 10, padding: "12px 14px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 14 }}>{ws.name}</div>
+                    <div style={{ fontSize: 11.5, color: "#6B7168" }}>{ws.ownerEmail} · {ws.nbMembres} membre{ws.nbMembres > 1 ? "s" : ""} · {ws.country}</div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: 12, fontWeight: 600 }}>
+                      {ws.subscription ? statusLabels[ws.subscription.status] || ws.subscription.status : "—"}
+                    </div>
+                    {enEssai && joursRestants !== null && (
+                      <div style={{ fontSize: 10.5, fontWeight: 700, marginTop: 2, color: essaiExpire ? "#D64933" : joursRestants <= 2 ? "#8A6412" : "#8A9089" }}>
+                        {essaiExpire ? "⏰ Essai terminé" : `${joursRestants} jour${joursRestants > 1 ? "s" : ""} restant${joursRestants > 1 ? "s" : ""}`}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                  {ws.whatsappNumber && (
+                    <a
+                      href={`https://wa.me/${String(ws.whatsappNumber).replace(/\D/g, "").replace(/^0/, "225")}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ background: "#EAF3DE", color: "#3B6D11", border: "1px solid #C7DDA3", borderRadius: 7, padding: "6px 12px", fontSize: 11.5, fontWeight: 600, textDecoration: "none" }}
+                    >
+                      💬 WhatsApp
+                    </a>
+                  )}
+                  {ws.subscription && (
+                    <button
+                      onClick={() => toggleStatus(ws.id, suspendu ? "reactiver" : "suspendre")}
+                      disabled={actionEnCours === ws.id}
+                      style={{ background: suspendu ? "#1a7a3c" : "#FBEAE6", color: suspendu ? "white" : "#D64933", border: suspendu ? "none" : "1px solid #F0B8AC", borderRadius: 7, padding: "6px 12px", fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}
+                    >
+                      {actionEnCours === ws.id ? "..." : suspendu ? "✅ Réactiver" : "🔒 Suspendre"}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      if (window.confirm(`Supprimer définitivement "${ws.name}" ?\n\nToutes ses commandes, clients et données seront perdues pour toujours. Cette action est IRRÉVERSIBLE.`)) {
+                        if (window.confirm(`Dernière confirmation — es-tu vraiment sûr de vouloir supprimer "${ws.name}" ?`)) {
+                          toggleStatus(ws.id, "supprimer");
+                        }
+                      }
+                    }}
+                    disabled={actionEnCours === ws.id}
+                    style={{ background: "white", color: "#8A9089", border: "1px solid #DDD8CC", borderRadius: 7, padding: "6px 12px", fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}
+                  >
+                    🗑️ Supprimer
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        {data.workspaces.length === 0 && <div style={{ color: "#8A9089", fontSize: 13 }}>Aucune entreprise inscrite pour l'instant.</div>}
+      </div>
+    </div>
+  );
+}
+
+function AbonnementModal({ workspace, subscription, onClose }) {
+  const [plans, setPlans] = useState([]);
+  const [demandes, setDemandes] = useState([]);
+  const [loading, setLoading] = useState(null);
+  const [message, setMessage] = useState("");
+  const [exportEnCours, setExportEnCours] = useState(false);
+  const [planEnAttenteInfos, setPlanEnAttenteInfos] = useState(null);
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [phone, setPhone] = useState("");
+
+  async function exporterMesDonnees() {
+    setExportEnCours(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const res = await fetch(`/api/export-my-data?workspaceId=${workspace.id}`, {
+        headers: { Authorization: `Bearer ${sessionData.session?.access_token}` },
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        alert(json.error || "Erreur lors de l'export");
+        setExportEnCours(false);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${workspace.name}-donnees-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert("Erreur: " + e.message);
+    }
+    setExportEnCours(false);
+  }
+
+  async function load() {
+    const { data: p } = await supabase.from("subscription_plans").select("*").order("prix");
+    setPlans(p || []);
+    const { data: d } = await supabase
+      .from("upgrade_requests")
+      .select("*, subscription_plans(nom)")
+      .eq("workspace_id", workspace.id)
+      .order("created_at", { ascending: false });
+    setDemandes(d || []);
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const demandeEnAttente = demandes.find((d) => d.statut === "en_attente");
+
+  function demander(planId) {
+    setPlanEnAttenteInfos(planId);
+  }
+
+  async function confirmerEtPayer() {
+    if (!firstName.trim() || !lastName.trim() || !phone.trim()) {
+      setMessage("Remplis ton prénom, nom et téléphone pour continuer.");
+      return;
+    }
+    const chiffresTelephone = phone.replace(/\D/g, "");
+    if (chiffresTelephone.length < 10) {
+      setMessage("Le numéro de téléphone semble incomplet (10 chiffres attendus, ex: 0708090910). Vérifie-le et réessaie.");
+      return;
+    }
+    const planId = planEnAttenteInfos;
+    setLoading(planId);
+    setMessage("");
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const res = await fetch("/api/chariow", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionData.session?.access_token}` },
+        body: JSON.stringify({ planId, firstName: firstName.trim(), lastName: lastName.trim(), phone: phone.trim() }),
+      });
+
+      const texteBrut = await res.text();
+      let json;
+      try {
+        json = JSON.parse(texteBrut);
+      } catch {
+        json = null;
+      }
+
+      if (res.ok && json?.url) {
+        window.location.href = json.url;
+        return;
+      }
+
+      const detailErreur = json?.error || texteBrut.slice(0, 200) || "aucun détail";
+      console.error("Erreur paiement Chariow — statut:", res.status, "contenu:", texteBrut);
+      setMessage(`⚠️ Échec (code ${res.status}) : ${detailErreur}. Bascule sur le système manuel.`);
+
+      await supabase.from("upgrade_requests").update({ statut: "annule" }).eq("workspace_id", workspace.id).eq("statut", "en_attente");
+      await supabase.from("upgrade_requests").insert([{ workspace_id: workspace.id, plan_id: planId }]);
+      await load();
+      setPlanEnAttenteInfos(null);
+    } catch (e) {
+      setMessage("Erreur réseau: " + e.message);
+    }
+    setLoading(null);
+  }
+
+  const planActuel = subscription?.subscription_plans?.nom;
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "white", borderRadius: 16, padding: 24, width: "100%", maxWidth: 400, maxHeight: "85vh", overflowY: "auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={{ fontWeight: 700, fontSize: 18 }}>Mon abonnement</div>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer" }}>×</button>
+        </div>
+
+        {planEnAttenteInfos ? (
+          <div>
+            <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 14 }}>
+              Quelques infos nécessaires pour le paiement en ligne.
+            </div>
+            <input placeholder="Prénom" value={firstName} onChange={(e) => setFirstName(e.target.value)} style={inputStyle} />
+            <input placeholder="Nom" value={lastName} onChange={(e) => setLastName(e.target.value)} style={inputStyle} />
+            <input placeholder="Téléphone (ex: 0708090910)" value={phone} onChange={(e) => setPhone(e.target.value)} style={inputStyle} />
+            {message && <div style={{ color: "#D64933", fontSize: 12.5, marginBottom: 10 }}>{message}</div>}
+            <button onClick={confirmerEtPayer} disabled={loading === planEnAttenteInfos} style={btnStyle}>
+              {loading === planEnAttenteInfos ? "..." : "Continuer vers le paiement"}
+            </button>
+            <button
+              onClick={() => setPlanEnAttenteInfos(null)}
+              style={{ width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 10, border: "1px solid #DDD8CC", background: "white", color: "#6B7168", fontWeight: 600, fontSize: 13, cursor: "pointer" }}
+            >
+              ← Retour
+            </button>
+          </div>
+        ) : (
+        <>
+        {planActuel && (
+          <div style={{ background: "#EAF3DE", border: "1px solid #C7DDA3", borderRadius: 10, padding: "10px 12px", marginBottom: 14, fontSize: 13, color: "#3B6D11" }}>
+            Plan actuel : <strong>{planActuel}</strong> — statut : {subscription.status}
+          </div>
+        )}
+
+        {demandeEnAttente && (
+          <div style={{ background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 10, padding: "10px 12px", marginBottom: 14, fontSize: 13, color: "#8A6412" }}>
+            ⏳ Demande en attente pour le plan <strong>{demandeEnAttente.subscription_plans?.nom}</strong> — en attente de confirmation.
+          </div>
+        )}
+
+        {message && (
+          <div style={{ background: "#EAF3DE", borderRadius: 10, padding: "10px 12px", marginBottom: 14, fontSize: 12.5, color: "#3B6D11" }}>
+            {message}
+          </div>
+        )}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {plans.map((p) => (
+            <div key={p.id} style={{ border: "1px solid #ECE8DC", borderRadius: 12, padding: "14px 16px" }}>
+              <div style={{ fontWeight: 700, fontSize: 15 }}>{p.nom}</div>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 18, color: "#1a7a3c", marginTop: 3 }}>
+                {Number(p.prix).toLocaleString("fr-FR")} {p.devise}<span style={{ fontSize: 11, color: "#8A9089", fontWeight: 400 }}>/mois</span>
+              </div>
+              <div style={{ fontSize: 11.5, color: "#6B7168", marginTop: 4 }}>
+                {p.max_commandes_mois ? `${p.max_commandes_mois} commandes/mois` : "Commandes illimitées"} · {p.max_membres ? `${p.max_membres} membres max` : "Membres illimités"}
+              </div>
+              <button
+                onClick={() => demander(p.id)}
+                disabled={loading === p.id || demandeEnAttente?.plan_id === p.id}
+                style={{ width: "100%", marginTop: 10, padding: "9px 0", borderRadius: 8, border: "none", background: p.nom === planActuel ? "#DDD8CC" : "#1a7a3c", color: "white", fontWeight: 600, fontSize: 13, cursor: "pointer" }}
+              >
+                {loading === p.id ? "..." : demandeEnAttente?.plan_id === p.id ? "⏳ En attente" : p.nom === planActuel ? "Plan actuel" : "Demander ce plan"}
+              </button>
+            </div>
+          ))}
+        </div>
+
+        {demandes.length > 0 && (
+          <div style={{ marginTop: 18, paddingTop: 16, borderTop: "1px solid #F0EEE6" }}>
+            <div style={{ fontSize: 11, color: "#8A9089", textTransform: "uppercase", marginBottom: 8 }}>Historique</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {demandes.map((d) => {
+                const statutInfo = {
+                  en_attente: { label: "⏳ En attente", couleur: "#8A6412", fond: "#FBF3E3" },
+                  confirmee: { label: "✅ Confirmé", couleur: "#3B6D11", fond: "#EAF3DE" },
+                  refuse: { label: "❌ Refusé", couleur: "#B23A22", fond: "#FBEAE6" },
+                  annule: { label: "Remplacée par une autre demande", couleur: "#8A9089", fond: "#FAFAF7" },
+                }[d.statut] || { label: d.statut, couleur: "#6B7168", fond: "#FAFAF7" };
+                return (
+                  <div key={d.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5, padding: "8px 10px", background: "#FAFAF7", borderRadius: 8 }}>
+                    <div>
+                      <div style={{ fontWeight: 600 }}>{d.subscription_plans?.nom || "Plan"}</div>
+                      <div style={{ fontSize: 11, color: "#8A9089" }}>{new Date(d.created_at).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}</div>
+                    </div>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: statutInfo.couleur, background: statutInfo.fond, padding: "3px 9px", borderRadius: 999 }}>
+                      {statutInfo.label}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div style={{ marginTop: 18, paddingTop: 16, borderTop: "1px solid #F0EEE6" }}>
+          <button
+            onClick={exporterMesDonnees}
+            disabled={exportEnCours}
+            style={{ width: "100%", background: "#FAFAF7", border: "1px solid #DDD8CC", color: "#16231F", padding: "10px 0", borderRadius: 10, fontWeight: 600, fontSize: 12.5, cursor: "pointer" }}
+          >
+            {exportEnCours ? "Export en cours..." : "💾 Télécharger toutes mes données"}
+          </button>
+          <div style={{ fontSize: 11, color: "#8A9089", marginTop: 6, textAlign: "center" }}>
+            Commandes, clients, équipe — au format que tu peux garder.
+          </div>
+        </div>
+        </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DemandeCard({ demande, onConfirmed }) {
+  const [loading, setLoading] = useState(false);
+
+  async function confirmer() {
+    const confirme = window.confirm(
+      `⚠️ Confirmes-tu avoir reçu ${Number(demande.subscription_plans?.prix).toLocaleString("fr-FR")} ${demande.subscription_plans?.devise} de la part de "${demande.workspaceName}" ?\n\nCette demande apparaît uniquement parce que le paiement automatique (Chariow) a échoué pour ce client. Ne clique "OK" que si tu as vraiment reçu l'argent (Mobile Money, virement, etc.) — sinon annule et vérifie d'abord avec le client.`
+    );
+    if (!confirme) return;
+    setLoading(true);
+    const { data: sessionData } = await supabase.auth.getSession();
+    const res = await fetch("/api/confirmer-paiement", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionData.session?.access_token}` },
+      body: JSON.stringify({ requestId: demande.id }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (res.ok) await onConfirmed();
+    else alert("Erreur (" + res.status + "): " + (json.error || "inconnue"));
+    setLoading(false);
+  }
+
+  return (
+    <div style={{ background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 10, padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div>
+        <div style={{ fontWeight: 600, fontSize: 14 }}>{demande.workspaceName}</div>
+        <div style={{ fontSize: 12, color: "#8A6412" }}>
+          Demande plan <strong>{demande.subscription_plans?.nom}</strong> — {Number(demande.subscription_plans?.prix).toLocaleString("fr-FR")} {demande.subscription_plans?.devise}
+        </div>
+      </div>
+      <button onClick={confirmer} disabled={loading} style={{ background: "#1a7a3c", color: "white", border: "none", borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+        {loading ? "..." : "✅ Confirmer reçu"}
+      </button>
+    </div>
+  );
+}
+
+const STATUTS = {
+  en_cours: { label: "En cours", color: "#E8A93D", bg: "#FBF3E3" },
+  confirmee: { label: "Confirmée", color: "#1F9D6E", bg: "#EAF7F1" },
+  echouee: { label: "Échouée", color: "#D64933", bg: "#FBEAE6" },
+};
+
+function CommandeCard({ commande, currency, onStatusChanged, livreurs = [], closers = [], onAssignLivreur, onAssignCloser, workspace, confirmateurNom, onCelebrate }) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({ client: commande.client, tel: commande.tel, produit: commande.produit, montant: commande.montant, zone: commande.zone, mode_vente: commande.mode_vente || "sur_place", montant_paye: commande.montant_paye ?? "", ville_expedition: commande.ville_expedition || "" });
+  const s = STATUTS[commande.statut] || STATUTS.en_cours;
+
+  async function enregistrerInfos() {
+    setLoading(true);
+    const infos = { client: form.client, tel: form.tel, produit: form.produit, montant: Number(form.montant), zone: form.zone, mode_vente: form.mode_vente, montant_paye: Number(form.montant_paye) || 0, ville_expedition: form.ville_expedition || null };
+    const { error } = await supabase.from("commandes").update(infos).eq("id", commande.id);
+    if (error) {
+      alert("Erreur: " + error.message);
+    } else {
+      await supabase.from("relances").insert([{ commande_id: commande.id, note: "✏️ Informations modifiées" }]);
+      await onStatusChanged();
+      setEditing(false);
+    }
+    setLoading(false);
+  }
+
+  async function changerStatut(nouveauStatut) {
+    if (nouveauStatut === "confirmee" && workspace?.activity_type === "retail" && Number(commande.montant_paye || 0) < Number(commande.montant)) {
+      alert("⛔ Impossible de confirmer : le solde n'est pas entièrement payé.");
+      return;
+    }
+    setLoading(true);
+    const ancienStatut = commande.statut;
+    const vraimentRecuperee = nouveauStatut === "confirmee" && ancienStatut === "echouee";
+    const infosValidation = nouveauStatut === "confirmee" ? { confirmed_at: new Date().toISOString(), confirmed_by: confirmateurNom || "Admin" } : {};
+    const { error } = await supabase.from("commandes").update({ statut: nouveauStatut, ...infosValidation }).eq("id", commande.id);
+    if (error) {
+      alert("Erreur: " + error.message);
+    } else {
+      await supabase.from("relances").insert([
+        { commande_id: commande.id, note: `📋 Statut : ${STATUTS[ancienStatut]?.label || ancienStatut} → ${STATUTS[nouveauStatut]?.label || nouveauStatut}${nouveauStatut === "confirmee" ? ` par ${confirmateurNom || "Admin"}` : ""}` },
+      ]);
+      if (nouveauStatut === "confirmee") {
+        supabase.auth.getSession().then(({ data: sessionData }) => {
+          fetch("/api/facebook-capi", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionData.session?.access_token}` },
+            body: JSON.stringify({ commandeId: commande.id }),
+          }).catch(() => {}); // silencieux — ne bloque jamais la confirmation si Facebook échoue
+        });
+      }
+      await onStatusChanged();
+      if (vraimentRecuperee && onCelebrate) onCelebrate(commande.montant, commande.client);
+    }
+    setLoading(false);
+    setOpen(false);
+  }
+
+  async function enregistrerPaiement() {
+    const montant = prompt("Montant reçu maintenant (FCFA) :");
+    if (!montant || Number(montant) <= 0) return;
+    const nouveauMontantPaye = Number(commande.montant_paye || 0) + Number(montant);
+    setLoading(true);
+    const { error } = await supabase.from("commandes").update({ montant_paye: nouveauMontantPaye }).eq("id", commande.id);
+    if (error) {
+      alert("Erreur: " + error.message);
+    } else {
+      await supabase.from("relances").insert([{ commande_id: commande.id, note: `💰 Paiement reçu : ${Number(montant).toLocaleString("fr-FR")} FCFA (total payé : ${nouveauMontantPaye.toLocaleString("fr-FR")})` }]);
+      await onStatusChanged();
+    }
+    setLoading(false);
+  }
+
+  async function confirmerDepotRecu() {
+    setLoading(true);
+    const { error } = await supabase.from("commandes").update({ depot_recu_closer: true }).eq("id", commande.id);
+    if (error) {
+      alert("Erreur: " + error.message);
+    } else {
+      await supabase.from("relances").insert([{ commande_id: commande.id, note: `📦 Dépôt reçu du client, colis prêt pour expédition${commande.ville_expedition ? ` vers ${commande.ville_expedition}` : ""}` }]);
+      await onStatusChanged();
+    }
+    setLoading(false);
+  }
+
+  async function marquerAExpedier() {
+    const ville = prompt("Vers quelle ville faut-il expédier ce colis ?");
+    if (ville === null) return;
+    setLoading(true);
+    const { error } = await supabase.from("commandes").update({ mode_vente: "expedition", ville_expedition: ville.trim() || null }).eq("id", commande.id);
+    if (error) {
+      alert("Erreur: " + error.message);
+    } else {
+      await supabase.from("relances").insert([{ commande_id: commande.id, note: `📦 Commande marquée à expédier${ville.trim() ? ` vers ${ville.trim()}` : ""}` }]);
+      await onStatusChanged();
+    }
+    setLoading(false);
+  }
+
+  return (
+    <div style={{ background: "white", border: "1px solid #ECE8DC", borderLeft: `4px solid ${s.color}`, borderRadius: 10, padding: "12px 14px" }}>
+      {editing ? (
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 13.5, marginBottom: 8 }}>Modifier la commande</div>
+          {["client", "tel", "produit", "montant", "zone"].map((f) => (
+            <input
+              key={f}
+              placeholder={f === "montant" ? `Montant (${currency})` : f}
+              value={form[f]}
+              onChange={(e) => setForm({ ...form, [f]: e.target.value })}
+              type={f === "montant" ? "number" : "text"}
+              style={{ ...inputStyle, marginBottom: 6, padding: "7px 9px", fontSize: 13 }}
+            />
+          ))}
+          {workspace?.activity_type === "retail" && (
+            <>
+              <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                <button
+                  onClick={() => setForm({ ...form, mode_vente: "sur_place" })}
+                  style={{ flex: 1, padding: "7px 4px", borderRadius: 7, border: `1px solid ${form.mode_vente === "sur_place" ? "#1a7a3c" : "#DDD8CC"}`, background: form.mode_vente === "sur_place" ? "#EAF3DE" : "white", fontSize: 11, fontWeight: 600, cursor: "pointer" }}
+                >
+                  🏪 Sur place
+                </button>
+                <button
+                  onClick={() => setForm({ ...form, mode_vente: "livraison" })}
+                  style={{ flex: 1, padding: "7px 4px", borderRadius: 7, border: `1px solid ${form.mode_vente === "livraison" ? "#e8920a" : "#DDD8CC"}`, background: form.mode_vente === "livraison" ? "#FBF3E3" : "white", fontSize: 11, fontWeight: 600, cursor: "pointer" }}
+                >
+                  🚚 Livraison
+                </button>
+                <button
+                  onClick={() => setForm({ ...form, mode_vente: "expedition" })}
+                  style={{ flex: 1, padding: "7px 4px", borderRadius: 7, border: `1px solid ${form.mode_vente === "expedition" ? "#2452E8" : "#DDD8CC"}`, background: form.mode_vente === "expedition" ? "#EAF0FB" : "white", fontSize: 11, fontWeight: 600, cursor: "pointer" }}
+                >
+                  📦 Expédition
+                </button>
+              </div>
+              {form.mode_vente === "expedition" && (
+                <input
+                  placeholder="Ville de destination"
+                  value={form.ville_expedition || ""}
+                  onChange={(e) => setForm({ ...form, ville_expedition: e.target.value })}
+                  style={{ ...inputStyle, marginBottom: 6, padding: "7px 9px", fontSize: 13 }}
+                />
+              )}
+              <input
+                placeholder="Montant payé"
+                value={form.montant_paye}
+                onChange={(e) => setForm({ ...form, montant_paye: e.target.value })}
+                type="number"
+                style={{ ...inputStyle, marginBottom: 6, padding: "7px 9px", fontSize: 13 }}
+              />
+            </>
+          )}
+          <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+            <button onClick={enregistrerInfos} disabled={loading} style={{ flex: 1, background: "#1a7a3c", color: "white", border: "none", borderRadius: 7, padding: "8px 0", fontWeight: 600, fontSize: 12.5, cursor: "pointer" }}>
+              {loading ? "..." : "Enregistrer"}
+            </button>
+            <button onClick={() => setEditing(false)} style={{ flex: 1, background: "white", border: "1px solid #DDD8CC", color: "#16231F", borderRadius: 7, padding: "8px 0", fontWeight: 600, fontSize: 12.5, cursor: "pointer" }}>
+              Annuler
+            </button>
+          </div>
+        </div>
+      ) : (
+      <>
+      <div onClick={() => setOpen(!open)} style={{ display: "flex", justifyContent: "space-between", cursor: "pointer" }}>
+        <div>
+          <div style={{ fontWeight: 600, fontSize: 14 }}>{commande.client}</div>
+          <div style={{ fontSize: 12, color: "#6B7168" }}>{commande.produit} · {commande.zone}</div>
+          <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 10.5, fontWeight: 600, color: s.color, background: s.bg, padding: "2px 8px", borderRadius: 999, display: "inline-block" }}>
+              {s.label}
+            </span>
+            {commande.livreur && (
+              <span style={{ fontSize: 10.5, fontWeight: 600, color: "#1a7a3c", background: "#EAF3DE", padding: "2px 8px", borderRadius: 999 }}>🚚 {commande.livreur}</span>
+            )}
+            {commande.closer && (
+              <span style={{ fontSize: 10.5, fontWeight: 600, color: "#8A6412", background: "#FBF3E3", padding: "2px 8px", borderRadius: 999 }}>🎧 {commande.closer}</span>
+            )}
+            {commande.statut === "confirmee" && commande.confirmed_by && (
+              <span style={{ fontSize: 10.5, fontWeight: 600, color: "#1a7a3c", background: "#EAF3DE", padding: "2px 8px", borderRadius: 999 }}>✅ validé par {commande.confirmed_by}</span>
+            )}
+            {workspace?.activity_type === "retail" && commande.statut === "en_cours" && Number(commande.montant_paye || 0) < Number(commande.montant) && (
+              <span style={{ fontSize: 10.5, fontWeight: 600, color: "#B23A22", background: "#FBEAE6", padding: "2px 8px", borderRadius: 999 }}>
+                💰 Solde : {(Number(commande.montant) - Number(commande.montant_paye || 0)).toLocaleString("fr-FR")} {currency}
+              </span>
+            )}
+          </div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontWeight: 700, fontSize: 14 }}>{Number(commande.montant).toLocaleString("fr-FR")} {currency}</div>
+          <div style={{ fontSize: 10, color: "#8A9089", marginTop: 3, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 3 }}>
+            Facture, WhatsApp... <span style={{ fontSize: 9 }}>{open ? "▲" : "▼"}</span>
+          </div>
+        </div>
+      </div>
+
+      {!open && commande.statut !== "confirmee" && (
+        <div style={{ display: "flex", gap: 6, marginTop: 8 }} onClick={(e) => e.stopPropagation()}>
+          <button
+            onClick={() => changerStatut("confirmee")}
+            disabled={loading}
+            style={{ flex: 1, background: "#1F9D6E", color: "white", border: "none", borderRadius: 7, padding: "8px 0", fontWeight: 700, fontSize: 12, cursor: "pointer" }}
+          >
+            ✅ Confirmer
+          </button>
+          <button
+            onClick={() => changerStatut("echouee")}
+            disabled={loading || commande.statut === "echouee"}
+            style={{ flex: 1, background: commande.statut === "echouee" ? "#F0EEE6" : "#D64933", color: commande.statut === "echouee" ? "#8A9089" : "white", border: "none", borderRadius: 7, padding: "8px 0", fontWeight: 700, fontSize: 12, cursor: commande.statut === "echouee" ? "default" : "pointer" }}
+          >
+            ❌ Échoué
+          </button>
+        </div>
+      )}
+
+      {open && (
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #F0EEE6" }}>
+          <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+            {Object.entries(STATUTS).map(([key, val]) => (
+              <button
+                key={key}
+                onClick={() => changerStatut(key)}
+                disabled={loading || commande.statut === key}
+                style={{
+                  flex: 1,
+                  padding: "7px 4px",
+                  borderRadius: 7,
+                  border: `1px solid ${commande.statut === key ? val.color : "#DDD8CC"}`,
+                  background: commande.statut === key ? val.bg : "white",
+                  color: commande.statut === key ? val.color : "#6B7168",
+                  fontSize: 11.5,
+                  fontWeight: 600,
+                  cursor: commande.statut === key ? "default" : "pointer",
+                }}
+              >
+                {val.label}
+              </button>
+            ))}
+          </div>
+
+          {workspace?.activity_type === "retail" && Number(commande.montant_paye || 0) < Number(commande.montant) && (
+            <button
+              onClick={enregistrerPaiement}
+              disabled={loading}
+              style={{ width: "100%", background: "#1a7a3c", color: "white", border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, fontSize: 13, cursor: "pointer", marginBottom: 10 }}
+            >
+              💰 Enregistrer un paiement (solde : {(Number(commande.montant) - Number(commande.montant_paye || 0)).toLocaleString("fr-FR")} {currency})
+            </button>
+          )}
+
+          {commande.mode_vente !== "expedition" && commande.statut !== "confirmee" && (
+            <button
+              onClick={marquerAExpedier}
+              disabled={loading}
+              style={{ width: "100%", background: "white", border: "1px solid #2452E8", color: "#2452E8", borderRadius: 8, padding: "9px 0", fontWeight: 700, fontSize: 12.5, cursor: "pointer", marginBottom: 10 }}
+            >
+              📦 Marquer à expédier (hors Abidjan)
+            </button>
+          )}
+
+          {commande.mode_vente === "expedition" && (
+            <>
+              {!commande.depot_recu_closer ? (
+                <button
+                  onClick={confirmerDepotRecu}
+                  disabled={loading}
+                  style={{ width: "100%", background: "#2452E8", color: "white", border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, fontSize: 13, cursor: "pointer", marginBottom: 10 }}
+                >
+                  📦 Confirmer dépôt reçu du client{commande.ville_expedition ? ` (→ ${commande.ville_expedition})` : ""}
+                </button>
+              ) : (
+                <div style={{ background: "#EAF0FB", border: "1px solid #C3D4F0", borderRadius: 8, padding: "9px 12px", marginBottom: 10, fontSize: 12, color: "#1E4B8C", fontWeight: 600 }}>
+                  ✅ Dépôt reçu — colis remis au livreur pour {commande.ville_expedition || "expédition"}
+                </div>
+              )}
+
+              {commande.photo_recu_expedition && (
+                <>
+                  <img
+                    src={commande.photo_recu_expedition}
+                    alt="Reçu d'expédition"
+                    style={{ width: "100%", borderRadius: 8, marginBottom: 8, border: "1px solid #ECE8DC" }}
+                  />
+                  <a
+                    href={`https://wa.me/${cleanPhoneForWhatsApp(commande.tel)}?text=${encodeURIComponent(`Bonjour ${(commande.client || "").split(" ")[0]} 👋, voici votre reçu d'expédition pour retirer votre colis à ${commande.ville_expedition || "destination"} :\n\n${commande.photo_recu_expedition}`)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ display: "block", textAlign: "center", width: "100%", background: "#1F9D6E", color: "white", padding: "9px 0", borderRadius: 8, fontWeight: 700, fontSize: 12.5, cursor: "pointer", marginBottom: 10, textDecoration: "none", boxSizing: "border-box" }}
+                  >
+                    💬 Envoyer le reçu au client (WhatsApp)
+                  </a>
+                </>
+              )}
+            </>
+          )}
+
+          {(livreurs.length > 0 || closers.length > 0) && (
+            <div style={{ display: "flex", gap: 8 }}>
+              {livreurs.length > 0 && (
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: 10.5, color: "#8A9089", display: "block", marginBottom: 3 }}>Livreur</label>
+                  <select
+                    value={commande.livreur || ""}
+                    onChange={(e) => onAssignLivreur(commande.id, e.target.value)}
+                    style={{ width: "100%", padding: "7px 8px", borderRadius: 7, border: "1px solid #DDD8CC", fontSize: 12, background: "white" }}
+                  >
+                    <option value="">Non assigné</option>
+                    {livreurs.map((l) => (
+                      <option key={l.id} value={l.nom}>{l.nom}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {closers.length > 0 && (
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: 10.5, color: "#8A9089", display: "block", marginBottom: 3 }}>Closer</label>
+                  <select
+                    value={commande.closer || ""}
+                    onChange={(e) => onAssignCloser(commande.id, e.target.value)}
+                    style={{ width: "100%", padding: "7px 8px", borderRadius: 7, border: "1px solid #DDD8CC", fontSize: 12, background: "white" }}
+                  >
+                    <option value="">Non assigné</option>
+                    {closers.map((c) => (
+                      <option key={c.id} value={c.nom}>{c.nom}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+          )}
+
+          {workspace && (
+            <>
+              {commande.statut !== "confirmee" ? (
+                <a
+                  href={`https://wa.me/${cleanPhoneForWhatsApp(commande.tel)}?text=${encodeURIComponent(`Bonjour ${(commande.client || "").split(" ")[0]} 👋, suivez votre commande en direct ici : ${window.location.origin}/?suivi=${commande.id}`)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ display: "block", textAlign: "center", width: "100%", background: "white", border: "1px solid #DDD8CC", color: "#16231F", padding: "9px 0", borderRadius: 8, fontWeight: 600, fontSize: 12.5, cursor: "pointer", marginBottom: 8, textDecoration: "none", boxSizing: "border-box" }}
+                >
+                  🔗 Envoyer le lien de suivi
+                </a>
+              ) : (
+                <a
+                  href={`https://wa.me/${cleanPhoneForWhatsApp(commande.tel)}?text=${encodeURIComponent(`Bonjour ${(commande.client || "").split(" ")[0]} 🙏, merci d'avoir commandé chez ${workspace.name} !\n\n🧾 Reçu de votre commande\nProduit : ${commande.produit}\nMontant : ${Number(commande.montant).toLocaleString("fr-FR")} ${workspace.currency}\nDate : ${new Date(commande.created_at).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}\n\nVotre colis vous a été livré avec succès ✅\n\nMerci pour votre confiance, à très bientôt ! 💚`)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ display: "block", textAlign: "center", width: "100%", background: "linear-gradient(135deg, #e8920a, #f0b94a)", color: "white", padding: "10px 0", borderRadius: 8, fontWeight: 700, fontSize: 12.5, cursor: "pointer", marginBottom: 8, textDecoration: "none", boxSizing: "border-box" }}
+                >
+                  🙏 Message de remerciement + reçu
+                </a>
+              )}
+              <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+                <button
+                  onClick={() => genererFacturePDF(commande, workspace)}
+                  style={{ flex: 1, background: "white", border: "1px solid #DDD8CC", color: "#16231F", padding: "9px 0", borderRadius: 8, fontWeight: 600, fontSize: 12, cursor: "pointer" }}
+                >
+                  🧾 Facture PDF
+                </button>
+                <a
+                  href={`https://wa.me/${cleanPhoneForWhatsApp(commande.tel)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: "#EAF3DE", border: "1px solid #C7DDA3", color: "#3B6D11", padding: "9px 0", borderRadius: 8, fontWeight: 600, fontSize: 12, cursor: "pointer", textDecoration: "none", textAlign: "center" }}
+                >
+                  💬 Ouvrir WhatsApp du client
+                </a>
+              </div>
+
+              <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                <a
+                  href={`https://wa.me/${cleanPhoneForWhatsApp(commande.tel)}?text=${encodeURIComponent(`Bonjour ${(commande.client || "").split(" ")[0]} 👋, nous confirmons votre commande "${commande.produit}" (${Number(commande.montant).toLocaleString("fr-FR")} ${workspace.currency}). Un livreur passera bientôt.`)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "#1F9D6E", color: "white", padding: "10px 0", borderRadius: 8, fontWeight: 600, fontSize: 12.5, textDecoration: "none" }}
+                >
+                  💬 Envoyer confirmation
+                </a>
+                <a
+                  href={`sms:${commande.tel}?body=${encodeURIComponent(`Bonjour ${(commande.client || "").split(" ")[0]}, votre commande ${commande.produit} (${Number(commande.montant).toLocaleString("fr-FR")} ${workspace.currency}) sera livrée bientôt. Merci de rester joignable.`)}`}
+                  style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "#1a7a3c", color: "white", padding: "10px 0", borderRadius: 8, fontWeight: 600, fontSize: 12.5, textDecoration: "none" }}
+                >
+                  ✉️ SMS
+                </a>
+                <a
+                  href={`tel:${commande.tel}`}
+                  style={{ display: "flex", alignItems: "center", justifyContent: "center", background: "white", border: "1px solid #DDD8CC", color: "#16231F", padding: "10px 16px", borderRadius: 8, fontWeight: 600, fontSize: 12.5, textDecoration: "none" }}
+                >
+                  📞
+                </a>
+              </div>
+            </>
+          )}
+
+          <button
+            onClick={() => setEditing(true)}
+            style={{ width: "100%", background: "white", border: "1px solid #DDD8CC", color: "#16231F", padding: "9px 0", borderRadius: 8, fontWeight: 600, fontSize: 12.5, cursor: "pointer", marginBottom: 10 }}
+          >
+            ✏️ Modifier les informations
+          </button>
+
+          <HistoriqueRelances commandeId={commande.id} />
+        </div>
+      )}
+      </>
+      )}
+    </div>
+  );
+}
+
+function HistoriqueRelances({ commandeId }) {
+  const [relances, setRelances] = useState(null);
+  const [note, setNote] = useState("");
+  const [adding, setAdding] = useState(false);
+
+  async function load() {
+    const { data } = await supabase.from("relances").select("*").eq("commande_id", commandeId).order("created_at", { ascending: false });
+    setRelances(data || []);
+  }
+
+  useEffect(() => {
+    load();
+  }, [commandeId]);
+
+  async function ajouter() {
+    if (!note.trim()) return;
+    setAdding(true);
+    await supabase.from("relances").insert([{ commande_id: commandeId, note: note.trim() }]);
+    setNote("");
+    await load();
+    setAdding(false);
+  }
+
+  return (
+    <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #F0EEE6" }}>
+      <div style={{ fontSize: 10.5, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 8 }}>
+        Historique {relances && relances.length > 0 && `(${relances.length})`}
+      </div>
+      <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+        <input
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && ajouter()}
+          placeholder="Ex: Appelé, pas de réponse"
+          style={{ flex: 1, padding: "7px 9px", borderRadius: 7, border: "1px solid #DDD8CC", fontSize: 12 }}
+        />
+        <button onClick={ajouter} disabled={adding || !note.trim()} style={{ background: "#1a7a3c", color: "white", border: "none", borderRadius: 7, padding: "0 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+          +
+        </button>
+      </div>
+      {relances && relances.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 5, maxHeight: 160, overflowY: "auto" }}>
+          {relances.map((r) => (
+            <div key={r.id} style={{ background: "#FAFAF7", borderRadius: 7, padding: "6px 9px" }}>
+              <div style={{ fontSize: 12 }}>{r.note}</div>
+              <div style={{ fontSize: 10, color: "#8A9089", marginTop: 1 }}>
+                {new Date(r.created_at).toLocaleDateString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EquipeModal({ titre, items, onAdd, onDelete, onClose, avecEmail }) {
+  const [nom, setNom] = useState("");
+  const [telephone, setTelephone] = useState("");
+  const [email, setEmail] = useState("");
+
+  async function ajouter() {
+    if (!nom.trim()) return;
+    const payload = { nom: nom.trim(), telephone: telephone.trim() };
+    if (avecEmail) payload.email = email.trim();
+    await onAdd(payload);
+    setNom("");
+    setTelephone("");
+    setEmail("");
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "white", borderRadius: 16, padding: 24, width: "100%", maxWidth: 360, maxHeight: "80vh", overflowY: "auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={{ fontWeight: 700, fontSize: 18 }}>{titre}</div>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer" }}>×</button>
+        </div>
+
+        <div style={{ display: "flex", gap: 6, marginBottom: avecEmail ? 6 : 16 }}>
+          <input placeholder="Nom" value={nom} onChange={(e) => setNom(e.target.value)} style={{ ...inputStyle, marginBottom: 0, flex: 1 }} />
+          <input placeholder="Téléphone" value={telephone} onChange={(e) => setTelephone(e.target.value)} style={{ ...inputStyle, marginBottom: 0, flex: 1 }} />
+        </div>
+        {avecEmail && (
+          <div style={{ marginBottom: 16 }}>
+            <input placeholder="Email de connexion (optionnel, pour le suivi GPS)" value={email} onChange={(e) => setEmail(e.target.value)} style={{ ...inputStyle, marginBottom: 4 }} />
+            <div style={{ fontSize: 11, color: "#8A9089" }}>Invite-le d'abord via "Gérer l'équipe", avec ce même email et le rôle Livreur.</div>
+          </div>
+        )}
+        <button onClick={ajouter} style={{ width: "100%", background: "#1a7a3c", color: "white", border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, fontSize: 14, cursor: "pointer", marginBottom: 16 }}>
+          Ajouter
+        </button>
+
+        {items.length === 0 && <div style={{ color: "#8A9089", fontSize: 13 }}>Aucun {titre.toLowerCase()} pour l'instant.</div>}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {items.map((it) => (
+            <div key={it.id} style={{ background: "#FAFAF7", border: "1px solid #ECE8DC", borderRadius: 10, padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 13.5 }}>{it.nom}</div>
+                {it.telephone && <div style={{ fontSize: 11.5, color: "#6B7168" }}>{it.telephone}</div>}
+                {it.email && <div style={{ fontSize: 10.5, color: "#8A9089" }}>{it.email}</div>}
+              </div>
+              <button onClick={() => onDelete(it.id, it.nom)} style={{ background: "none", border: "none", color: "#D64933", cursor: "pointer", fontSize: 13 }}>🗑️</button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EditeurRiche({ valeur, onChange, workspaceId, placeholder }) {
+  const editeurRef = useRef(null);
+  const [envoiImage, setEnvoiImage] = useState(false);
+  const [initialise, setInitialise] = useState(false);
+
+  useEffect(() => {
+    if (editeurRef.current && !initialise) {
+      editeurRef.current.innerHTML = valeur || "";
+      setInitialise(true);
+    }
+  }, [valeur, initialise]);
+
+  function appliquer(commande, arg) {
+    editeurRef.current.focus();
+    document.execCommand(commande, false, arg);
+    onChange(editeurRef.current.innerHTML);
+  }
+
+  async function inserer_image(fichier) {
+    if (!fichier) return;
+    if (fichier.size > 5 * 1024 * 1024) {
+      alert("L'image est trop lourde (max 5 Mo). Choisis une image plus légère.");
+      return;
+    }
+    setEnvoiImage(true);
+    const extension = fichier.name.split(".").pop();
+    const chemin = `${workspaceId}-desc-${Date.now()}.${extension}`;
+    const { error } = await supabase.storage.from("produits").upload(chemin, fichier, { upsert: true });
+    if (error) {
+      alert("Erreur lors de l'envoi de l'image : " + error.message);
+      setEnvoiImage(false);
+      return;
+    }
+    const { data } = supabase.storage.from("produits").getPublicUrl(chemin);
+    editeurRef.current.focus();
+    document.execCommand("insertHTML", false, `<img src="${data.publicUrl}" style="max-width:100%;border-radius:8px;margin:8px 0;display:block;" />`);
+    onChange(editeurRef.current.innerHTML);
+    setEnvoiImage(false);
+  }
+
+  return (
+    <div style={{ border: "1px solid #DDD8CC", borderRadius: 8, overflow: "hidden" }}>
+      <div style={{ display: "flex", gap: 4, padding: "6px 8px", background: "#FAFAF7", borderBottom: "1px solid #ECE8DC", flexWrap: "wrap" }}>
+        <button type="button" onClick={() => appliquer("bold")} style={boutonEditeurStyle}><b>G</b></button>
+        <button type="button" onClick={() => appliquer("italic")} style={boutonEditeurStyle}><i>I</i></button>
+        <button type="button" onClick={() => appliquer("insertUnorderedList")} style={boutonEditeurStyle}>• Liste</button>
+        <label style={{ ...boutonEditeurStyle, cursor: "pointer" }}>
+          {envoiImage ? "Envoi..." : "🖼️ Image"}
+          <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => inserer_image(e.target.files?.[0])} />
+        </label>
+      </div>
+      <div
+        ref={editeurRef}
+        contentEditable
+        onInput={(e) => onChange(e.currentTarget.innerHTML)}
+        data-placeholder={placeholder}
+        style={{ minHeight: 90, padding: "10px 12px", fontSize: 13, lineHeight: 1.5, outline: "none" }}
+        className="rv-editeur-riche"
+      />
+      <style>{`.rv-editeur-riche:empty:before { content: attr(data-placeholder); color: #8A9089; }`}</style>
+    </div>
+  );
+}
+
+const boutonEditeurStyle = { background: "white", border: "1px solid #DDD8CC", borderRadius: 6, padding: "5px 10px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#16231F" };
+
+function parserCSV(texte) {
+  const lignes = [];
+  let ligne = [];
+  let champ = "";
+  let dansGuillemets = false;
+  const chars = texte.replace(/\r\n/g, "\n");
+  for (let i = 0; i < chars.length; i++) {
+    const c = chars[i];
+    if (dansGuillemets) {
+      if (c === '"') {
+        if (chars[i + 1] === '"') { champ += '"'; i++; }
+        else dansGuillemets = false;
+      } else champ += c;
+    } else {
+      if (c === '"') dansGuillemets = true;
+      else if (c === ",") { ligne.push(champ); champ = ""; }
+      else if (c === "\n") { ligne.push(champ); lignes.push(ligne); ligne = []; champ = ""; }
+      else champ += c;
+    }
+  }
+  if (champ.length > 0 || ligne.length > 0) { ligne.push(champ); lignes.push(ligne); }
+  if (lignes.length === 0) return [];
+  const entetes = lignes[0].map((h) => h.trim());
+  return lignes.slice(1).filter((l) => l.some((v) => v.trim() !== "")).map((l) => {
+    const obj = {};
+    entetes.forEach((h, i) => { obj[h] = (l[i] || "").trim(); });
+    return obj;
+  });
+}
+
+function mapperColonnesShopify(lignesBrutes) {
+  const dejaVus = new Set();
+  const resultat = [];
+  for (const l of lignesBrutes) {
+    const nom = l["Title"] || l["nom"] || l["Nom"] || l["name"] || "";
+    if (!nom.trim()) continue;
+    const handle = l["Handle"] || nom;
+    if (dejaVus.has(handle)) continue; // Shopify exporte une ligne par variante, on ne garde que la première
+    dejaVus.add(handle);
+    resultat.push({
+      nom: nom.trim(),
+      description: (l["Body (HTML)"] || l["description"] || l["Description"] || "").trim(),
+      prix_vente: l["Variant Price"] || l["prix_vente"] || l["Prix"] || l["price"] || "",
+      photo_url: l["Image Src"] || l["photo_url"] || l["Photo"] || l["image"] || "",
+    });
+  }
+  return resultat;
+}
+
+function CollectionsModal({ workspaceId, produits, onClose }) {
+  const [collections, setCollections] = useState(null);
+  const [nouveauNom, setNouveauNom] = useState("");
+  const [collectionOuverte, setCollectionOuverte] = useState(null);
+  const [produitsDeLaCollection, setProduitsDeLaCollection] = useState(new Set());
+
+  async function charger() {
+    const { data } = await supabase.from("collections").select("*").eq("workspace_id", workspaceId).order("ordre");
+    setCollections(data || []);
+  }
+
+  useEffect(() => {
+    charger();
+  }, []);
+
+  async function creerCollection() {
+    if (!nouveauNom.trim()) return;
+    const ordre = (collections || []).length;
+    await supabase.from("collections").insert([{ workspace_id: workspaceId, nom: nouveauNom.trim(), ordre }]);
+    setNouveauNom("");
+    await charger();
+  }
+
+  async function supprimerCollection(id) {
+    if (!window.confirm("Supprimer cette collection ? Les produits ne seront pas supprimés, juste retirés de cette collection.")) return;
+    await supabase.from("collections").delete().eq("id", id);
+    await charger();
+    if (collectionOuverte === id) setCollectionOuverte(null);
+  }
+
+  async function ouvrirGestionProduits(collectionId) {
+    setCollectionOuverte(collectionId);
+    const { data } = await supabase.from("collection_produits").select("produit_id").eq("collection_id", collectionId);
+    setProduitsDeLaCollection(new Set((data || []).map((r) => r.produit_id)));
+  }
+
+  async function toggleProduit(produitId) {
+    const dejaDedans = produitsDeLaCollection.has(produitId);
+    if (dejaDedans) {
+      await supabase.from("collection_produits").delete().eq("collection_id", collectionOuverte).eq("produit_id", produitId);
+    } else {
+      await supabase.from("collection_produits").insert([{ collection_id: collectionOuverte, produit_id: produitId }]);
+    }
+    const nouvelEnsemble = new Set(produitsDeLaCollection);
+    if (dejaDedans) nouvelEnsemble.delete(produitId);
+    else nouvelEnsemble.add(produitId);
+    setProduitsDeLaCollection(nouvelEnsemble);
+  }
+
+  const collectionOuverteNom = (collections || []).find((c) => c.id === collectionOuverte)?.nom;
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "white", borderRadius: 16, padding: 24, width: "100%", maxWidth: 440, maxHeight: "85vh", overflowY: "auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={{ fontWeight: 700, fontSize: 18 }}>
+            {collectionOuverte ? `📁 ${collectionOuverteNom}` : "📁 Collections"}
+          </div>
+          <button onClick={collectionOuverte ? () => setCollectionOuverte(null) : onClose} style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer" }}>
+            {collectionOuverte ? "← Retour" : "×"}
+          </button>
+        </div>
+
+        {!collectionOuverte && (
+          <>
+            <div style={{ fontSize: 12.5, color: "#6B7168", marginBottom: 14 }}>
+              Regroupe tes produits par thème (Promo, Rentrée...) — visible sur ta boutique publique, en plus des collections automatiques.
+            </div>
+
+            <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
+              <input
+                placeholder="Nom de la collection (ex: Promo)"
+                value={nouveauNom}
+                onChange={(e) => setNouveauNom(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && creerCollection()}
+                style={{ ...inputStyle, marginBottom: 0, flex: 1 }}
+              />
+              <button onClick={creerCollection} style={{ background: "#1a7a3c", color: "white", border: "none", borderRadius: 8, padding: "0 14px", fontWeight: 700, fontSize: 18, cursor: "pointer" }}>+</button>
+            </div>
+
+            {collections === null && <div style={{ color: "#8A9089", fontSize: 13 }}>Chargement...</div>}
+            {collections !== null && collections.length === 0 && (
+              <div style={{ color: "#8A9089", fontSize: 13, textAlign: "center", padding: "20px 0" }}>Aucune collection pour l'instant.</div>
+            )}
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {(collections || []).map((c) => (
+                <div key={c.id} style={{ background: "#FAFAF7", border: "1px solid #ECE8DC", borderRadius: 10, padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <button onClick={() => ouvrirGestionProduits(c.id)} style={{ background: "none", border: "none", padding: 0, textAlign: "left", flex: 1, cursor: "pointer", fontWeight: 600, fontSize: 13.5, color: "#16231F" }}>
+                    {c.nom}
+                  </button>
+                  <button onClick={() => supprimerCollection(c.id)} style={{ background: "none", border: "none", color: "#D64933", cursor: "pointer", fontSize: 13 }}>🗑️</button>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {collectionOuverte && (
+          <>
+            <div style={{ fontSize: 12.5, color: "#6B7168", marginBottom: 14 }}>
+              Coche les produits à inclure dans cette collection.
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {produits.map((p) => (
+                <label key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, background: "#FAFAF7", border: "1px solid #ECE8DC", borderRadius: 8, padding: "9px 12px", cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={produitsDeLaCollection.has(p.id)}
+                    onChange={() => toggleProduit(p.id)}
+                    style={{ width: 16, height: 16, cursor: "pointer" }}
+                  />
+                  <span style={{ fontSize: 13, flex: 1 }}>{p.nom}</span>
+                  {p.prix_vente && <span style={{ fontSize: 12, color: "#8A9089" }}>{Number(p.prix_vente).toLocaleString("fr-FR")}</span>}
+                </label>
+              ))}
+              {produits.length === 0 && (
+                <div style={{ color: "#8A9089", fontSize: 13, textAlign: "center", padding: "20px 0" }}>Aucun produit dans ton catalogue.</div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AvisModal({ workspaceId, onClose }) {
+  const [avis, setAvis] = useState(null);
+  const [produitsMap, setProduitsMap] = useState({});
+
+  async function charger() {
+    const { data: produitsData } = await supabase.from("produits").select("id, nom").eq("workspace_id", workspaceId);
+    const map = {};
+    (produitsData || []).forEach((p) => { map[p.id] = p.nom; });
+    setProduitsMap(map);
+
+    const { data } = await supabase
+      .from("avis_produits")
+      .select("*")
+      .eq("workspace_id", workspaceId)
+      .order("created_at", { ascending: false });
+    setAvis(data || []);
+  }
+
+  useEffect(() => {
+    charger();
+  }, []);
+
+  async function approuver(id) {
+    await supabase.from("avis_produits").update({ approuve: true }).eq("id", id);
+    await charger();
+  }
+
+  async function supprimer(id) {
+    await supabase.from("avis_produits").delete().eq("id", id);
+    await charger();
+  }
+
+  const enAttente = (avis || []).filter((a) => !a.approuve);
+  const approuves = (avis || []).filter((a) => a.approuve);
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "white", borderRadius: 16, padding: 24, width: "100%", maxWidth: 440, maxHeight: "85vh", overflowY: "auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={{ fontWeight: 700, fontSize: 18 }}>⭐ Avis clients</div>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer" }}>×</button>
+        </div>
+
+        {avis === null && <div style={{ color: "#8A9089", fontSize: 13 }}>Chargement...</div>}
+
+        {avis !== null && enAttente.length > 0 && (
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontWeight: 700, fontSize: 13, color: "#8A6412", marginBottom: 10 }}>⏳ En attente d'approbation ({enAttente.length})</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {enAttente.map((a) => (
+                <div key={a.id} style={{ background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 10, padding: "12px 14px" }}>
+                  <div style={{ fontSize: 11, color: "#8A6412", marginBottom: 4 }}>{produitsMap[a.produit_id] || "Produit"}</div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontWeight: 600, fontSize: 13 }}>{a.client_nom}</span>
+                    <span style={{ color: "#e8920a", fontSize: 12 }}>{"★".repeat(a.note)}{"☆".repeat(5 - a.note)}</span>
+                  </div>
+                  {a.commentaire && <div style={{ fontSize: 12.5, color: "#16231F", marginTop: 4 }}>{a.commentaire}</div>}
+                  <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                    <button onClick={() => approuver(a.id)} style={{ flex: 1, background: "#1a7a3c", color: "white", border: "none", borderRadius: 7, padding: "6px 0", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>✅ Approuver</button>
+                    <button onClick={() => supprimer(a.id)} style={{ flex: 1, background: "white", border: "1px solid #DDD8CC", color: "#D64933", borderRadius: 7, padding: "6px 0", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>🗑️ Rejeter</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 10 }}>✅ Publiés ({approuves.length})</div>
+        {approuves.length === 0 && <div style={{ color: "#8A9089", fontSize: 13 }}>Aucun avis publié pour l'instant.</div>}
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {approuves.map((a) => (
+            <div key={a.id} style={{ background: "#FAFAF7", border: "1px solid #ECE8DC", borderRadius: 10, padding: "12px 14px" }}>
+              <div style={{ fontSize: 11, color: "#8A9089", marginBottom: 4 }}>{produitsMap[a.produit_id] || "Produit"}</div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontWeight: 600, fontSize: 13 }}>{a.client_nom}</span>
+                <span style={{ color: "#e8920a", fontSize: 12 }}>{"★".repeat(a.note)}{"☆".repeat(5 - a.note)}</span>
+              </div>
+              {a.commentaire && <div style={{ fontSize: 12.5, color: "#16231F", marginTop: 4 }}>{a.commentaire}</div>}
+              <button onClick={() => supprimer(a.id)} style={{ marginTop: 6, background: "none", border: "none", color: "#D64933", fontSize: 11.5, cursor: "pointer", padding: 0 }}>🗑️ Retirer</button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProduitsModal({ produits, onAdd, onUpdateCout, onUpdateStock, onUpdatePrixVente, onUpdatePhoto, onUpdateDescription, onUpdateGalerie, quantitesParProduit, onDelete, currency, workspaceId, onClose, onImportCSV }) {
+  const [nom, setNom] = useState("");
+  const [cout, setCout] = useState("");
+  const [editId, setEditId] = useState(null);
+  const [editValue, setEditValue] = useState("");
+  const [editStockId, setEditStockId] = useState(null);
+  const [editStockValue, setEditStockValue] = useState("");
+  const [editPrixId, setEditPrixId] = useState(null);
+  const [editPrixValue, setEditPrixValue] = useState("");
+  const [editPhotoId, setEditPhotoId] = useState(null);
+  const [editPhotoValue, setEditPhotoValue] = useState("");
+  const [editDescId, setEditDescId] = useState(null);
+  const [editDescValue, setEditDescValue] = useState("");
+  const [photoEnvoiId, setPhotoEnvoiId] = useState(null);
+  const [galerieEnvoiId, setGalerieEnvoiId] = useState(null);
+  const [importEnCours, setImportEnCours] = useState(false);
+  const [resultatImport, setResultatImport] = useState(null);
+
+  async function envoyerPhoto(produitId, fichier) {
+    if (!fichier) return;
+    if (fichier.size > 5 * 1024 * 1024) {
+      alert("L'image est trop lourde (max 5 Mo). Choisis une photo plus légère.");
+      return;
+    }
+    setPhotoEnvoiId(produitId);
+    const extension = fichier.name.split(".").pop();
+    const chemin = `${produitId}-${Date.now()}.${extension}`;
+    const { error: erreurUpload } = await supabase.storage.from("produits").upload(chemin, fichier, { upsert: true });
+    if (erreurUpload) {
+      alert("Erreur lors de l'envoi de la photo : " + erreurUpload.message);
+      setPhotoEnvoiId(null);
+      return;
+    }
+    const { data } = supabase.storage.from("produits").getPublicUrl(chemin);
+    await onUpdatePhoto(produitId, data.publicUrl);
+    setPhotoEnvoiId(null);
+  }
+
+  async function ajouterPhotoGalerie(produit, fichier) {
+    if (!fichier) return;
+    if (fichier.size > 5 * 1024 * 1024) {
+      alert("L'image est trop lourde (max 5 Mo). Choisis une photo plus légère.");
+      return;
+    }
+    setGalerieEnvoiId(produit.id);
+    const extension = fichier.name.split(".").pop();
+    const chemin = `${produit.id}-galerie-${Date.now()}.${extension}`;
+    const { error: erreurUpload } = await supabase.storage.from("produits").upload(chemin, fichier, { upsert: true });
+    if (erreurUpload) {
+      alert("Erreur lors de l'envoi de la photo : " + erreurUpload.message);
+      setGalerieEnvoiId(null);
+      return;
+    }
+    const { data } = supabase.storage.from("produits").getPublicUrl(chemin);
+    const nouvelleGalerie = [...(produit.photos_galerie || []), data.publicUrl];
+    await onUpdateGalerie(produit.id, nouvelleGalerie);
+    setGalerieEnvoiId(null);
+  }
+
+  async function retirerPhotoGalerie(produit, urlARetirer) {
+    const nouvelleGalerie = (produit.photos_galerie || []).filter((u) => u !== urlARetirer);
+    await onUpdateGalerie(produit.id, nouvelleGalerie);
+  }
+
+  async function ajouter() {
+    if (!nom.trim()) return;
+    await onAdd({ nom: nom.trim(), cout_achat: cout });
+    setNom("");
+    setCout("");
+  }
+
+  const totalStock = produits.reduce((s, p) => s + Number(p.stock_initial || 0), 0);
+  const totalVendu = produits.reduce((s, p) => s + (quantitesParProduit[p.nom]?.commandees || 0), 0);
+  const totalLivre = produits.reduce((s, p) => s + (quantitesParProduit[p.nom]?.livrees || 0), 0);
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "white", borderRadius: 16, padding: 24, width: "100%", maxWidth: 400, maxHeight: "85vh", overflowY: "auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <div style={{ fontWeight: 700, fontSize: 18 }}>Catalogue & Stock</div>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer" }}>×</button>
+        </div>
+        <div style={{ fontSize: 12, color: "#6B7168", marginBottom: 14 }}>
+          Le nom doit correspondre exactement à celui utilisé dans tes commandes. Renseigne le stock acheté pour suivre ce qu'il reste.
+        </div>
+
+        {produits.length > 0 && (
+          <div style={{ background: "#16231F", borderRadius: 12, padding: "12px 14px", marginBottom: 16, display: "flex", justifyContent: "space-around", textAlign: "center" }}>
+            <div>
+              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", textTransform: "uppercase" }}>En stock</div>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 18, color: "white" }}>{totalStock}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", textTransform: "uppercase" }}>Engagé</div>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 18, color: "#e8920a" }}>{totalVendu}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", textTransform: "uppercase" }}>Livré</div>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 18, color: "#7fd6a3" }}>{totalLivre}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", textTransform: "uppercase" }}>Restant</div>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 18, color: "white" }}>{totalStock - totalVendu}</div>
+            </div>
+          </div>
+        )}
+
+        <label style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", background: "#EAF3DE", border: "1px solid #C7DDA3", borderRadius: 10, padding: "12px 0", fontWeight: 700, fontSize: 13, color: "#3B6D11", cursor: importEnCours ? "default" : "pointer", marginBottom: 8, boxSizing: "border-box" }}>
+          {importEnCours ? "Import en cours..." : "📥 Importer un catalogue (CSV Shopify ou autre)"}
+          <input
+            type="file"
+            accept=".csv"
+            style={{ display: "none" }}
+            onChange={async (e) => {
+              const fichier = e.target.files?.[0];
+              if (!fichier) return;
+              setImportEnCours(true);
+              setResultatImport(null);
+              try {
+                const texte = await fichier.text();
+                const brut = parserCSV(texte);
+                const mappe = mapperColonnesShopify(brut);
+                if (mappe.length === 0) {
+                  setResultatImport({ succes: false, message: "Aucun produit reconnu dans ce fichier. Vérifie qu'il contient bien une colonne \"Title\" (Shopify) ou \"nom\"." });
+                } else {
+                  const resultat = await onImportCSV(mappe);
+                  if (resultat.succes) {
+                    setResultatImport({ succes: true, message: `${resultat.importes} produit${resultat.importes > 1 ? "s" : ""} importé${resultat.importes > 1 ? "s" : ""}.${resultat.ignores > 0 ? ` ${resultat.ignores} ignoré${resultat.ignores > 1 ? "s" : ""} (déjà présents dans ton catalogue).` : ""}` });
+                  } else {
+                    setResultatImport({ succes: false, message: resultat.message || "Erreur lors de l'import, réessaie." });
+                  }
+                }
+              } catch (err) {
+                setResultatImport({ succes: false, message: "Impossible de lire ce fichier : " + err.message });
+              }
+              setImportEnCours(false);
+              e.target.value = "";
+            }}
+          />
+        </label>
+        {resultatImport && (
+          <div style={{ background: resultatImport.succes ? "#EAF3DE" : "#FBEAE6", border: `1px solid ${resultatImport.succes ? "#C7DDA3" : "#F0B8AC"}`, borderRadius: 8, padding: "8px 12px", marginBottom: 12, fontSize: 12, color: resultatImport.succes ? "#3B6D11" : "#D64933" }}>
+            {resultatImport.succes ? "✅ " : "⚠️ "}{resultatImport.message}
+          </div>
+        )}
+        <div style={{ fontSize: 11, color: "#8A9089", marginTop: -4, marginBottom: 14 }}>
+          Le coût d'achat sera à 0 par défaut après import — pense à le renseigner ensuite pour chaque produit.
+        </div>
+
+        <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
+          <input placeholder="Nom du produit" value={nom} onChange={(e) => setNom(e.target.value)} style={{ ...inputStyle, marginBottom: 0, flex: 2 }} />
+          <input placeholder="Coût" type="number" value={cout} onChange={(e) => setCout(e.target.value)} style={{ ...inputStyle, marginBottom: 0, flex: 1 }} />
+          <button onClick={ajouter} style={{ background: "#1a7a3c", color: "white", border: "none", borderRadius: 8, padding: "0 14px", fontWeight: 700, fontSize: 18, cursor: "pointer" }}>+</button>
+        </div>
+
+        {produits.length === 0 && <div style={{ color: "#8A9089", fontSize: 13 }}>Aucun produit dans le catalogue.</div>}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {produits.map((p) => {
+            const q = quantitesParProduit[p.nom] || { commandees: 0, livrees: 0 };
+            const stock = Number(p.stock_initial || 0);
+            const restant = stock - q.commandees;
+            return (
+              <div key={p.id} style={{ background: "#FAFAF7", border: "1px solid #ECE8DC", borderRadius: 10, padding: "10px 12px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.nom}</div>
+                    {editId === p.id ? (
+                      <div style={{ display: "flex", gap: 5, marginTop: 4 }}>
+                        <input type="number" value={editValue} onChange={(e) => setEditValue(e.target.value)} autoFocus style={{ flex: 1, padding: "5px 7px", borderRadius: 6, border: "1px solid #DDD8CC", fontSize: 12 }} />
+                        <button onClick={() => { onUpdateCout(p.id, editValue); setEditId(null); }} style={{ background: "#1a7a3c", color: "white", border: "none", borderRadius: 6, padding: "0 9px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>OK</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => { setEditId(p.id); setEditValue(String(p.cout_achat)); }} style={{ background: "none", border: "none", padding: 0, marginTop: 2, fontSize: 12, color: "#6B7168", textDecoration: "underline", cursor: "pointer" }}>
+                        Coût : {Number(p.cout_achat).toLocaleString("fr-FR")} {currency}
+                      </button>
+                    )}
+                    {editPrixId === p.id ? (
+                      <div style={{ display: "flex", gap: 5, marginTop: 4 }}>
+                        <input type="number" value={editPrixValue} onChange={(e) => setEditPrixValue(e.target.value)} autoFocus placeholder="Prix de vente" style={{ flex: 1, padding: "5px 7px", borderRadius: 6, border: "1px solid #DDD8CC", fontSize: 12 }} />
+                        <button onClick={() => { onUpdatePrixVente(p.id, editPrixValue); setEditPrixId(null); }} style={{ background: "#1a7a3c", color: "white", border: "none", borderRadius: 6, padding: "0 9px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>OK</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => { setEditPrixId(p.id); setEditPrixValue(String(p.prix_vente || "")); }} style={{ background: "none", border: "none", padding: 0, marginTop: 2, fontSize: 12, color: p.prix_vente ? "#1a7a3c" : "#D64933", textDecoration: "underline", cursor: "pointer" }}>
+                        {p.prix_vente ? `Prix de vente : ${Number(p.prix_vente).toLocaleString("fr-FR")} ${currency}` : "⚠️ Ajouter un prix de vente (pour le catalogue)"}
+                      </button>
+                    )}
+                    {photoEnvoiId === p.id ? (
+                      <div style={{ fontSize: 11.5, color: "#8A9089", marginTop: 4 }}>Envoi de la photo...</div>
+                    ) : (
+                      <label style={{ display: "inline-block", marginTop: 2, fontSize: 12, color: "#6B7168", textDecoration: "underline", cursor: "pointer" }}>
+                        {p.photo_url ? "📷 Changer la photo principale" : "📷 Ajouter une photo principale (optionnel)"}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          style={{ display: "none" }}
+                          onChange={(e) => envoyerPhoto(p.id, e.target.files?.[0])}
+                        />
+                      </label>
+                    )}
+
+                    <div style={{ marginTop: 8 }}>
+                      {(p.photos_galerie || []).length > 0 && (
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
+                          {p.photos_galerie.map((url) => (
+                            <div key={url} style={{ position: "relative" }}>
+                              <img src={url} alt="" style={{ width: 44, height: 44, borderRadius: 6, objectFit: "cover", border: "1px solid #DDD8CC" }} />
+                              <button
+                                onClick={() => retirerPhotoGalerie(p, url)}
+                                style={{ position: "absolute", top: -5, right: -5, width: 16, height: 16, borderRadius: "50%", background: "#D64933", color: "white", border: "none", fontSize: 10, lineHeight: 1, cursor: "pointer" }}
+                              >
+                                ×
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <label style={{ display: "inline-block", fontSize: 11.5, color: "#6B7168", textDecoration: "underline", cursor: "pointer" }}>
+                        {galerieEnvoiId === p.id ? "Envoi..." : `🖼️ Ajouter une photo à la galerie (${(p.photos_galerie || []).length}/6)`}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          style={{ display: "none" }}
+                          disabled={(p.photos_galerie || []).length >= 6}
+                          onChange={(e) => ajouterPhotoGalerie(p, e.target.files?.[0])}
+                        />
+                      </label>
+                    </div>
+                    {editDescId === p.id ? (
+                      <div style={{ marginTop: 6 }}>
+                        <EditeurRiche
+                          valeur={editDescValue}
+                          onChange={setEditDescValue}
+                          workspaceId={workspaceId}
+                          placeholder="Description visible par les clients en boutique"
+                        />
+                        <button onClick={() => { onUpdateDescription(p.id, editDescValue); setEditDescId(null); }} style={{ marginTop: 6, background: "#1a7a3c", color: "white", border: "none", borderRadius: 6, padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Enregistrer</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => { setEditDescId(p.id); setEditDescValue(p.description || ""); }} style={{ display: "block", background: "none", border: "none", padding: 0, marginTop: 4, fontSize: 12, color: p.description ? "#6B7168" : "#D64933", textDecoration: "underline", cursor: "pointer", textAlign: "left" }}>
+                        {p.description ? "📝 " + p.description.replace(/<[^>]*>/g, " ").trim().slice(0, 40) + "..." : "📝 Ajouter une description (pour la boutique)"}
+                      </button>
+                    )}
+                  </div>
+                  <button onClick={() => onDelete(p.id)} style={{ background: "none", border: "none", color: "#D64933", cursor: "pointer", fontSize: 13, flexShrink: 0 }}>🗑️</button>
+                </div>
+
+                <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #ECE8DC" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                    <span style={{ fontSize: 10.5, color: "#8A9089", textTransform: "uppercase" }}>Stock acheté</span>
+                    {editStockId === p.id ? (
+                      <div style={{ display: "flex", gap: 5 }}>
+                        <input type="number" value={editStockValue} onChange={(e) => setEditStockValue(e.target.value)} autoFocus style={{ width: 65, padding: "4px 6px", borderRadius: 6, border: "1px solid #DDD8CC", fontSize: 12 }} />
+                        <button onClick={() => { onUpdateStock(p.id, editStockValue); setEditStockId(null); }} style={{ background: "#1a7a3c", color: "white", border: "none", borderRadius: 6, padding: "0 8px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>OK</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => { setEditStockId(p.id); setEditStockValue(String(p.stock_initial || 0)); }} style={{ background: "none", border: "none", padding: 0, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 13, color: "#16231F", textDecoration: "underline", cursor: "pointer" }}>
+                        {stock} pièces
+                      </button>
+                    )}
+                  </div>
+                  <div style={{ display: "flex", gap: 5 }}>
+                    <div style={{ flex: 1, background: "#FBF3E3", borderRadius: 7, padding: "5px 7px", textAlign: "center" }}>
+                      <div style={{ fontSize: 9.5, color: "#8A6412" }}>Engagé</div>
+                      <div style={{ fontWeight: 700, fontSize: 12.5, color: "#8A6412" }}>{q.commandees}</div>
+                    </div>
+                    <div style={{ flex: 1, background: "#EAF7F1", borderRadius: 7, padding: "5px 7px", textAlign: "center" }}>
+                      <div style={{ fontSize: 9.5, color: "#1F9D6E" }}>Livré</div>
+                      <div style={{ fontWeight: 700, fontSize: 12.5, color: "#1F9D6E" }}>{q.livrees}</div>
+                    </div>
+                    <div style={{ flex: 1, background: restant <= 5 && stock > 0 ? "#FBEAE6" : "#EAF3DE", borderRadius: 7, padding: "5px 7px", textAlign: "center" }}>
+                      <div style={{ fontSize: 9.5, color: restant <= 5 && stock > 0 ? "#D64933" : "#3B6D11" }}>Restant</div>
+                      <div style={{ fontWeight: 700, fontSize: 12.5, color: restant <= 5 && stock > 0 ? "#D64933" : "#3B6D11" }}>{stock > 0 ? restant : "—"}</div>
+                    </div>
+                  </div>
+                  {stock > 0 && restant <= 5 && restant > 0 && (
+                    <div style={{ fontSize: 10, color: "#D64933", marginTop: 4, fontWeight: 600 }}>⚠️ Stock bientôt épuisé</div>
+                  )}
+                  {stock > 0 && restant <= 0 && (
+                    <div style={{ fontSize: 10, color: "#D64933", marginTop: 4, fontWeight: 600 }}>🔴 Stock épuisé</div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LivreurPortalSaas({ livreur, commandes, currency, onStatusChanged }) {
+  const [enTournee, setEnTournee] = useState(!!livreur.en_tournee);
+  const [commandeAConfirmer, setCommandeAConfirmer] = useState(null);
+  const [gpsErreur, setGpsErreur] = useState(null);
+  const watchIdRef = React.useRef(null);
+
+  async function majPosition(lat, lng) {
+    await supabase.from("livreurs").update({ position_lat: lat, position_lng: lng, position_maj: new Date().toISOString() }).eq("id", livreur.id);
+  }
+
+  function demarrerTournee() {
+    if (!navigator.geolocation) {
+      setGpsErreur("La géolocalisation n'est pas disponible sur cet appareil.");
+      return;
+    }
+    setGpsErreur(null);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        await supabase.from("livreurs").update({ en_tournee: true }).eq("id", livreur.id);
+        await majPosition(pos.coords.latitude, pos.coords.longitude);
+        setEnTournee(true);
+        watchIdRef.current = navigator.geolocation.watchPosition(
+          (p) => majPosition(p.coords.latitude, p.coords.longitude),
+          () => {},
+          { enableHighAccuracy: true, maximumAge: 15000, timeout: 20000 }
+        );
+      },
+      (err) => {
+        setGpsErreur(err.code === err.PERMISSION_DENIED ? "Autorisation de localisation refusée. Active-la dans les réglages de ton téléphone." : "Impossible d'obtenir ta position pour le moment.");
+      },
+      { enableHighAccuracy: true, timeout: 15000 }
+    );
+  }
+
+  async function terminerTournee() {
+    if (watchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+    await supabase.from("livreurs").update({ en_tournee: false }).eq("id", livreur.id);
+    setEnTournee(false);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
+    };
+  }, []);
+
+  const actives = commandes.filter((c) => c.statut === "en_cours" || c.statut === "echouee");
+  const actives_livraison = actives.filter((c) => c.mode_vente !== "expedition");
+  const actives_expedition = actives.filter((c) => c.mode_vente === "expedition");
+  const confirmees = commandes.filter((c) => c.statut === "confirmee");
+  const [ongletActif, setOngletActif] = useState("livraison");
+  const [envoiPhotoId, setEnvoiPhotoId] = useState(null);
+
+  const bilanParJour = React.useMemo(() => {
+    const map = {};
+    confirmees.forEach((c) => {
+      const d = new Date(c.created_at);
+      const key = d.toISOString().slice(0, 10);
+      if (!map[key]) {
+        map[key] = { date: key, label: d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }), livrees: 0, gains: 0 };
+      }
+      map[key].livrees += 1;
+      map[key].gains += 1500;
+    });
+    return Object.values(map).sort((a, b) => (a.date < b.date ? 1 : -1));
+  }, [confirmees]);
+  const [showBilan, setShowBilan] = useState(false);
+
+  async function changerStatut(commandeId, nouveauStatut, modePaiement) {
+    const infosValidation = nouveauStatut === "confirmee" ? { confirmed_at: new Date().toISOString(), confirmed_by: livreur.nom, mode_paiement: modePaiement || null } : {};
+    await supabase.from("commandes").update({ statut: nouveauStatut, ...infosValidation }).eq("id", commandeId);
+    if (nouveauStatut === "confirmee") {
+      supabase.auth.getSession().then(({ data: sessionData }) => {
+        fetch("/api/facebook-capi", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionData.session?.access_token}` },
+          body: JSON.stringify({ commandeId }),
+        }).catch(() => {});
+      });
+    }
+    await onStatusChanged();
+  }
+
+  async function confirmerExpedition(commandeId, fichierPhoto) {
+    if (!fichierPhoto) return;
+    if (fichierPhoto.size > 5 * 1024 * 1024) {
+      alert("La photo est trop lourde (max 5 Mo). Choisis une photo plus légère.");
+      return;
+    }
+    setEnvoiPhotoId(commandeId);
+    const extension = fichierPhoto.name.split(".").pop();
+    const chemin = `${commandeId}-${Date.now()}.${extension}`;
+    const { error: erreurUpload } = await supabase.storage.from("expeditions").upload(chemin, fichierPhoto, { upsert: true });
+    if (erreurUpload) {
+      alert("Erreur lors de l'envoi de la photo : " + erreurUpload.message);
+      setEnvoiPhotoId(null);
+      return;
+    }
+    const { data } = supabase.storage.from("expeditions").getPublicUrl(chemin);
+    await supabase.from("commandes").update({
+      photo_recu_expedition: data.publicUrl,
+      expedition_confirmee: true,
+      expedition_confirmee_le: new Date().toISOString(),
+      statut: "confirmee",
+      confirmed_at: new Date().toISOString(),
+      confirmed_by: livreur.nom,
+    }).eq("id", commandeId);
+    await supabase.from("relances").insert([{ commande_id: commandeId, note: `📦 Expédition confirmée par ${livreur.nom}, reçu photographié` }]);
+    await onStatusChanged();
+    setEnvoiPhotoId(null);
+  }
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#FAFAF7", fontFamily: "'IBM Plex Sans', sans-serif" }}>
+      <div style={{ background: "#1a7a3c", color: "white", padding: 20 }}>
+        <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 4 }}>RecuVente</div>
+        <div style={{ fontSize: 13, opacity: 0.8 }}>Bonjour</div>
+        <div style={{ fontWeight: 700, fontSize: 22 }}>{livreur.nom}</div>
+
+        <button
+          onClick={enTournee ? terminerTournee : demarrerTournee}
+          style={{ width: "100%", marginTop: 14, padding: "13px 0", borderRadius: 10, border: "none", background: enTournee ? "#D64933" : "#e8920a", color: "white", fontWeight: 700, fontSize: 14.5, cursor: "pointer" }}
+        >
+          {enTournee ? "🔴 Terminer ma tournée" : "🟢 Démarrer ma tournée"}
+        </button>
+        {enTournee && <div style={{ fontSize: 11.5, opacity: 0.8, marginTop: 6, textAlign: "center" }}>📍 Ta position est partagée avec l'entreprise pendant ta tournée</div>}
+        {gpsErreur && <div style={{ background: "rgba(214,73,51,0.2)", borderRadius: 8, padding: "8px 10px", marginTop: 8, fontSize: 12 }}>{gpsErreur}</div>}
+
+        <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+          <div style={{ flex: 1, background: "rgba(255,255,255,0.1)", borderRadius: 10, padding: "10px 12px" }}>
+            <div style={{ fontSize: 11, opacity: 0.75 }}>À traiter</div>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 20 }}>{actives.length}</div>
+          </div>
+          <div style={{ flex: 1, background: "rgba(255,255,255,0.1)", borderRadius: 10, padding: "10px 12px" }}>
+            <div style={{ fontSize: 11, opacity: 0.75 }}>Confirmées</div>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 20 }}>{confirmees.length}</div>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 10, background: "rgba(232,146,10,0.18)", border: "1px solid rgba(232,146,10,0.35)", borderRadius: 10, padding: "12px 14px" }}>
+          <div style={{ fontSize: 11, opacity: 0.85 }}>💰 Mes gains ({confirmees.length} × 1 500 {currency})</div>
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 22, color: "#e8920a", marginTop: 2 }}>
+            {(confirmees.length * 1500).toLocaleString("fr-FR")} {currency}
+          </div>
+          {bilanParJour.length > 0 && (
+            <button
+              onClick={() => setShowBilan(!showBilan)}
+              style={{ marginTop: 8, background: "rgba(255,255,255,0.15)", border: "none", color: "white", borderRadius: 7, padding: "6px 10px", fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}
+            >
+              📊 {showBilan ? "Cacher" : "Voir"} mon bilan journalier
+            </button>
+          )}
+        </div>
+
+        {showBilan && bilanParJour.length > 0 && (
+          <div style={{ marginTop: 10, background: "rgba(255,255,255,0.08)", borderRadius: 10, padding: "12px 14px" }}>
+            <div style={{ fontSize: 10.5, opacity: 0.75, textTransform: "uppercase", marginBottom: 8 }}>Bilan par jour</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {bilanParJour.map((j) => (
+                <div key={j.date} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5 }}>
+                  <span style={{ textTransform: "capitalize", opacity: 0.9 }}>{j.label}</span>
+                  <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600 }}>
+                    {j.livrees} livrée{j.livrees > 1 ? "s" : ""} · {j.gains.toLocaleString("fr-FR")} {currency}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <button onClick={() => supabase.auth.signOut()} style={{ width: "100%", marginTop: 14, background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: "8px 0", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>
+          Déconnexion
+        </button>
+      </div>
+
+      <div style={{ padding: "18px 20px" }}>
+        {actives_expedition.length > 0 && (
+          <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+            <button
+              onClick={() => setOngletActif("livraison")}
+              style={{ flex: 1, padding: "9px 0", borderRadius: 9, border: `1px solid ${ongletActif === "livraison" ? "#1a7a3c" : "#DDD8CC"}`, background: ongletActif === "livraison" ? "#1a7a3c" : "white", color: ongletActif === "livraison" ? "white" : "#16231F", fontWeight: 600, fontSize: 13, cursor: "pointer" }}
+            >
+              🚚 Livraisons ({actives_livraison.length})
+            </button>
+            <button
+              onClick={() => setOngletActif("expedition")}
+              style={{ flex: 1, padding: "9px 0", borderRadius: 9, border: `1px solid ${ongletActif === "expedition" ? "#2452E8" : "#DDD8CC"}`, background: ongletActif === "expedition" ? "#2452E8" : "white", color: ongletActif === "expedition" ? "white" : "#16231F", fontWeight: 600, fontSize: 13, cursor: "pointer" }}
+            >
+              📦 Expéditions ({actives_expedition.length})
+            </button>
+          </div>
+        )}
+
+        {ongletActif === "livraison" && (
+        actives_livraison.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "50px 20px", color: "#8A9089" }}>
+            <div style={{ fontSize: 40, marginBottom: 10 }}>🎉</div>
+            <div style={{ fontSize: 14 }}>Aucune commande à traiter pour le moment.</div>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {actives_livraison.map((c) => (
+              <div key={c.id} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "14px 16px" }}>
+                <div style={{ fontWeight: 700, fontSize: 15.5 }}>{c.client}</div>
+                <div style={{ fontSize: 13, color: "#6B7168", marginTop: 3 }}>{c.produit}</div>
+                <div style={{ fontSize: 13, color: "#6B7168", marginTop: 2 }}>📍 {c.zone}</div>
+                <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 17, marginTop: 8, color: "#1a7a3c" }}>{Number(c.montant).toLocaleString("fr-FR")} {currency}</div>
+                <a href={`tel:${c.tel}`} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "white", border: "1px solid #DDD8CC", color: "#16231F", padding: "10px 0", borderRadius: 9, fontWeight: 600, fontSize: 13, textDecoration: "none", marginTop: 12 }}>
+                  📞 {c.tel}
+                </a>
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <button onClick={() => setCommandeAConfirmer(c)} style={{ flex: 1, background: "#1F9D6E", color: "white", border: "none", padding: "11px 0", borderRadius: 9, fontWeight: 700, fontSize: 13.5, cursor: "pointer" }}>
+                    ✅ Confirmer
+                  </button>
+                  <button onClick={() => changerStatut(c.id, "echouee")} style={{ flex: 1, background: "#D64933", color: "white", border: "none", padding: "11px 0", borderRadius: 9, fontWeight: 700, fontSize: 13.5, cursor: "pointer" }}>
+                    ❌ Échoué
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )
+        )}
+
+        {ongletActif === "expedition" && (
+          actives_expedition.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "50px 20px", color: "#8A9089" }}>
+              <div style={{ fontSize: 40, marginBottom: 10 }}>📦</div>
+              <div style={{ fontSize: 14 }}>Aucun colis à expédier pour le moment.</div>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {actives_expedition.map((c) => (
+                <div key={c.id} style={{ background: "white", border: "1px solid #ECE8DC", borderLeft: "4px solid #2452E8", borderRadius: 12, padding: "14px 16px" }}>
+                  <div style={{ fontWeight: 700, fontSize: 15.5 }}>{c.client}</div>
+                  <div style={{ fontSize: 13, color: "#6B7168", marginTop: 3 }}>{c.produit}</div>
+                  <div style={{ fontSize: 13, color: "#2452E8", marginTop: 2, fontWeight: 600 }}>📦 Destination : {c.ville_expedition || "non précisée"}</div>
+                  <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 17, marginTop: 8, color: "#1a7a3c" }}>{Number(c.montant).toLocaleString("fr-FR")} {currency}</div>
+
+                  {!c.depot_recu_closer && (
+                    <div style={{ background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 8, padding: "8px 10px", marginTop: 10, fontSize: 11.5, color: "#8A6412" }}>
+                      ⏳ En attente — le closer doit d'abord confirmer avoir reçu le dépôt du client.
+                    </div>
+                  )}
+
+                  {c.depot_recu_closer && !c.expedition_confirmee && (
+                    <label style={{ display: "block", textAlign: "center", width: "100%", background: "#2452E8", color: "white", padding: "11px 0", borderRadius: 9, fontWeight: 700, fontSize: 13.5, cursor: "pointer", marginTop: 12, boxSizing: "border-box" }}>
+                      {envoiPhotoId === c.id ? "Envoi en cours..." : "📷 Confirmer produit expédié (photo du reçu)"}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        style={{ display: "none" }}
+                        onChange={(e) => confirmerExpedition(c.id, e.target.files?.[0])}
+                      />
+                    </label>
+                  )}
+
+                  {c.expedition_confirmee && (
+                    <div style={{ background: "#EAF3DE", border: "1px solid #C7DDA3", borderRadius: 8, padding: "9px 12px", marginTop: 10, fontSize: 12.5, color: "#3B6D11", fontWeight: 600, textAlign: "center" }}>
+                      ✅ Expédition confirmée
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )
+        )}
+      </div>
+
+      {commandeAConfirmer && (
+        <div
+          onClick={() => setCommandeAConfirmer(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 60 }}
+        >
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "white", width: "100%", maxWidth: 420, borderRadius: "18px 18px 0 0", padding: "20px 18px 28px" }}>
+            <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>Comment le client a-t-il payé ?</div>
+            <div style={{ fontSize: 12.5, color: "#8A9089", marginBottom: 16 }}>{commandeAConfirmer.client} — {Number(commandeAConfirmer.montant).toLocaleString("fr-FR")} {currency}</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {[
+                { key: "cash", label: "💵 Cash (espèces)" },
+                { key: "orange_money", label: "🟠 Orange Money" },
+                { key: "wave", label: "🌊 Wave" },
+                { key: "mtn_money", label: "🟡 MTN Money" },
+                { key: "moov_money", label: "🔵 Moov Money" },
+              ].map((mode) => (
+                <button
+                  key={mode.key}
+                  onClick={() => { changerStatut(commandeAConfirmer.id, "confirmee", mode.key); setCommandeAConfirmer(null); }}
+                  style={{ background: "#FAFAF7", border: "1px solid #ECE8DC", borderRadius: 10, padding: "13px 16px", textAlign: "left", fontWeight: 600, fontSize: 14, cursor: "pointer" }}
+                >
+                  {mode.label}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setCommandeAConfirmer(null)} style={{ width: "100%", marginTop: 10, background: "none", border: "none", color: "#8A9089", fontSize: 13, padding: "8px 0", cursor: "pointer" }}>
+              Annuler
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ComptablePortalSaas({ workspace, commandes, livreurs, produits }) {
+  const [datePreset, setDatePreset] = useState("semaine");
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
 
   const dateRange = useMemo(() => {
     const now = new Date();
@@ -606,1152 +5056,114 @@ export default function App() {
     return { start, end };
   }, [datePreset, customStart, customEnd]);
 
-  const previousRange = useMemo(() => {
-    const duration = dateRange.end.getTime() - dateRange.start.getTime();
-    return { start: new Date(dateRange.start.getTime() - duration), end: dateRange.start };
-  }, [dateRange]);
+  const periodLabel = { aujourdhui: "Aujourd'hui", hier: "Hier", avanthier: "Avant-hier", semaine: "Cette semaine", mois: "Ce mois", personnalise: "Période personnalisée" }[datePreset];
 
-  const ordersInRange = useMemo(() => {
-    return orders.filter((o) => {
-      const d = new Date(o.created_at);
+  function parseProduitTexteLocal(texte) {
+    if (!texte) return { nom: "", quantite: 1 };
+    const match = texte.match(/^(.*?)\s*x\s*(\d+)\s*$/i);
+    if (match) return { nom: match[1].trim(), quantite: Number(match[2]) || 1 };
+    return { nom: texte.trim(), quantite: 1 };
+  }
+
+  const commandesInRange = useMemo(() => {
+    return commandes.filter((c) => {
+      const d = new Date(c.created_at);
       return d >= dateRange.start && d < dateRange.end;
     });
-  }, [orders, dateRange]);
+  }, [commandes, dateRange]);
 
-  const ordersPreviousRange = useMemo(() => {
-    return orders.filter((o) => {
-      const d = new Date(o.created_at);
-      return d >= previousRange.start && d < previousRange.end;
-    });
-  }, [orders, previousRange]);
-
-  const chiffreAffairesPrecedent = useMemo(
-    () => ordersPreviousRange.reduce((sum, o) => sum + Number(o.montant), 0),
-    [ordersPreviousRange]
-  );
-
+  const confirmees = commandesInRange.filter((c) => c.statut === "confirmee");
+  const caConfirme = confirmees.reduce((s, c) => s + Number(c.montant), 0);
   const COUT_LIVRAISON = 1500;
+  const coutLivraisons = workspace.activity_type === "retail" ? confirmees.filter((c) => c.mode_vente === "livraison" || c.mode_vente === "expedition").length * COUT_LIVRAISON : confirmees.length * COUT_LIVRAISON;
 
-  function trouverCoutProduit(texteProduit) {
-    const { nom, quantite } = parseProduitTexte(texteProduit);
-    const trouve = catalogueProduits.find((p) => p.nom.toLowerCase() === nom.toLowerCase());
-    if (!trouve) return null;
-    return trouve.cout_achat * quantite;
-  }
-
-  const stats = useMemo(() => {
-    const confirmees = ordersInRange.filter((o) => o.statut === "confirmee");
-    const echouees = ordersInRange.filter((o) => o.statut === "echouee");
-    const enCours = ordersInRange.filter((o) => o.statut === "en_cours");
-    const recupere = ordersInRange.reduce((sum, o) => sum + (o.recupere ? Number(o.montant) + Number(o.frais_expedition || 0) : 0), 0);
-    const chiffreAffaires = ordersInRange.reduce((sum, o) => sum + Number(o.montant) + Number(o.frais_expedition || 0), 0);
-    const tauxLivraison = ordersInRange.length ? Math.round((confirmees.length / ordersInRange.length) * 100) : 0;
-    const tauxEchec = ordersInRange.length ? Math.round((echouees.length / ordersInRange.length) * 100) : 0;
-    const coutLivraisons = confirmees.length * COUT_LIVRAISON;
-    const montantConfirme = confirmees.reduce((sum, o) => sum + Number(o.montant) + Number(o.frais_expedition || 0), 0);
-
-    let coutProduitsTotal = 0;
-    let nbCoutInconnu = 0;
-    let montantCoutInconnu = 0;
-    confirmees.forEach((o) => {
-      const cout = trouverCoutProduit(o.produit);
-      if (cout === null) {
-        nbCoutInconnu += 1;
-        montantCoutInconnu += Number(o.montant);
+  const coutProduitsInfo = useMemo(() => {
+    let coutTotal = 0, nbInconnu = 0, montantInconnu = 0;
+    confirmees.forEach((c) => {
+      const { nom, quantite } = parseProduitTexteLocal(c.produit);
+      const trouve = produits.find((p) => p.nom.toLowerCase() === nom.toLowerCase());
+      if (!trouve) {
+        nbInconnu += 1;
+        montantInconnu += Number(c.montant);
       } else {
-        coutProduitsTotal += cout;
+        coutTotal += trouve.cout_achat * quantite;
       }
     });
+    return { coutTotal, nbInconnu, montantInconnu };
+  }, [confirmees, produits]);
 
-    const beneficeReel = montantConfirme - coutLivraisons - coutProduitsTotal;
+  const beneficeReel = caConfirme - coutLivraisons - coutProduitsInfo.coutTotal;
 
-    return {
-      recupere,
-      chiffreAffaires,
-      aRisque: echouees.length + enCours.length,
-      tauxLivraison,
-      tauxEchec,
-      total: ordersInRange.length,
-      livrees: confirmees.length,
-      enAttente: enCours.length,
-      echouees: echouees.length,
-      coutLivraisons,
-      coutProduitsTotal,
-      nbCoutInconnu,
-      montantCoutInconnu,
-      beneficeReel,
-    };
-  }, [ordersInRange, catalogueProduits]);
-
-  const evolutionCA = useMemo(() => {
-    if (chiffreAffairesPrecedent === 0) return null;
-    return Math.round(((stats.chiffreAffaires - chiffreAffairesPrecedent) / chiffreAffairesPrecedent) * 100);
-  }, [stats.chiffreAffaires, chiffreAffairesPrecedent]);
-
-  const [searchQuery, setSearchQuery] = useState("");
-
-  const clientsSuspects = useMemo(() => {
-    const map = {};
-    orders.forEach((o) => {
-      const key = o.tel;
-      if (!key) return;
-      if (!map[key]) map[key] = { tel: key, nom: o.client, echouees: 0, total: 0 };
-      map[key].total += 1;
-      if (o.statut === "echouee") map[key].echouees += 1;
-    });
-    return Object.values(map).filter((c) => c.echouees >= 3);
-  }, [orders]);
-
-  const relanceCountByOrder = useMemo(() => {
-    const map = {};
-    const lastByOrder = {};
-    allRelances.forEach((r) => {
-      map[r.commande_id] = (map[r.commande_id] || 0) + 1;
-      if (!lastByOrder[r.commande_id] || new Date(r.created_at) > new Date(lastByOrder[r.commande_id])) {
-        lastByOrder[r.commande_id] = r.created_at;
-      }
-    });
-    return { count: map, last: lastByOrder };
-  }, [allRelances]);
-
-  const todoAujourdhui = useMemo(() => {
-    const today = new Date();
-    const todayStr = today.toISOString().slice(0, 10);
-    const now24hAgo = new Date(today.getTime() - 24 * 3600 * 1000);
-
-    const actives = orders.filter((o) => o.statut === "en_cours" || o.statut === "echouee");
-
-    const byMontant = (a, b) => Number(b.montant) - Number(a.montant);
-
-    const aRelivrer = actives.filter((o) => o.date_relivraison === todayStr).sort(byMontant);
-
-    const jamaisContactees = actives
-      .filter((o) => !relanceCountByOrder.count[o.id] && aRelivrer.every((a) => a.id !== o.id))
-      .sort(byMontant);
-
-    const sansNouvelles = actives
-      .filter((o) => {
-        if (aRelivrer.some((a) => a.id === o.id)) return false;
-        if (jamaisContactees.some((j) => j.id === o.id)) return false;
-        const last = relanceCountByOrder.last[o.id];
-        if (!last) return false;
-        return new Date(last) < now24hAgo;
+  const depotsParLivreur = useMemo(() => {
+    return livreurs
+      .map((l) => {
+        const mesLivrees = confirmees.filter((c) => c.livreur === l.nom);
+        const montantRecupere = mesLivrees.reduce((s, c) => s + Number(c.montant), 0);
+        const commission = mesLivrees.length * COUT_LIVRAISON;
+        return { nom: l.nom, livrees: mesLivrees.length, montantRecupere, commission, aDeposer: montantRecupere - commission };
       })
-      .sort(byMontant);
+      .filter((l) => l.livrees > 0)
+      .sort((a, b) => b.aDeposer - a.aDeposer);
+  }, [livreurs, confirmees]);
 
-    const total = aRelivrer.length + jamaisContactees.length + sansNouvelles.length;
-    const montantTotal = [...aRelivrer, ...jamaisContactees, ...sansNouvelles].reduce((s, o) => s + Number(o.montant), 0);
+  const totalCommission = depotsParLivreur.reduce((s, l) => s + l.commission, 0);
+  const totalADeposer = depotsParLivreur.reduce((s, l) => s + l.aDeposer, 0);
 
-    const echouees = orders.filter((o) => o.statut === "echouee");
-    const enCoursOrEchouee = orders.filter((o) => o.statut === "en_cours" || o.statut === "echouee");
-    const argentARisque = enCoursOrEchouee.reduce((s, o) => s + Number(o.montant), 0);
-    const argentRecuperable = echouees.reduce((s, o) => s + Number(o.montant), 0);
-
-    return {
-      aRelivrer,
-      jamaisContactees,
-      sansNouvelles,
-      total,
-      montantTotal,
-      argentARisque,
-      argentRecuperable,
-    };
-  }, [orders, relanceCountByOrder]);
-
-  const [filterLivreur, setFilterLivreur] = useState("tous");
-  const [filterProduit, setFilterProduit] = useState("tous");
-
-  const filtered = useMemo(() => {
-    let r = filter === "toutes" ? ordersInRange : ordersInRange.filter((o) => o.statut === filter);
-    if (filterLivreur !== "tous") r = r.filter((o) => o.livreur === filterLivreur);
-    if (filterProduit !== "tous") r = r.filter((o) => (o.produit || "").split(" x")[0].trim() === filterProduit);
-    if (searchQuery.trim()) {
-      const q = searchQuery.trim().toLowerCase();
-      r = r.filter((o) => (o.client || "").toLowerCase().includes(q) || (o.tel || "").includes(q));
-    }
-    return r;
-  }, [ordersInRange, filter, filterLivreur, filterProduit, searchQuery]);
-
-  const evolution = useMemo(() => {
+  const livreursAvecCommandes = useMemo(() => {
     const map = {};
-    ordersInRange.forEach((o) => {
-      const d = new Date(o.created_at);
-      const key = d.toISOString().slice(0, 10);
-      if (!map[key]) map[key] = { date: key, commandes: 0, revenus: 0, label: d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" }) };
-      map[key].commandes += 1;
-      map[key].revenus += Number(o.montant);
+    commandesInRange.forEach((c) => {
+      if (!c.livreur) return;
+      map[c.livreur] = (map[c.livreur] || 0) + 1;
     });
-    return Object.values(map).sort((a, b) => (a.date < b.date ? -1 : 1));
-  }, [ordersInRange]);
+    return Object.entries(map).map(([nom, total]) => ({ nom, total })).sort((a, b) => b.total - a.total);
+  }, [commandesInRange]);
 
-  const groupedByDay = useMemo(() => {
-    const groups = {};
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-
-    filtered.forEach((o) => {
-      const d = new Date(o.created_at);
-      const dayKey = d.toISOString().slice(0, 10);
-      if (!groups[dayKey]) {
-        const label = d.toLocaleDateString("fr-FR", {
-          weekday: "long",
-          day: "numeric",
-          month: "long",
-        });
-        groups[dayKey] = { label, orders: [] };
-      }
-      groups[dayKey].orders.push(o);
-    });
-
-    return Object.entries(groups)
-      .sort((a, b) => (a[0] < b[0] ? 1 : -1))
-      .map(([key, val]) => val);
-  }, [filtered]);
-
-  async function updateStatus(id, statut) {
-    const current = orders.find((o) => o.id === id);
-    if (statut === "confirmee" && current?.type_livraison === "expedition" && !current?.depot_recu) {
-      showToast("⛔ Impossible de confirmer : le dépôt n'a pas encore été reçu");
-      return;
-    }
-    const vraimentRecuperee = statut === "confirmee" && current?.statut === "echouee";
-    const recupere = vraimentRecuperee ? true : current?.recupere;
-    const nomValidateur = monProfilLivreur?.nom || monProfilCloser?.nom || "Admin";
-    const infosValidation = statut === "confirmee" ? { confirmed_at: new Date().toISOString(), confirmed_by: nomValidateur } : {};
-    const { error } = await supabase.from("commandes").update({ statut, recupere, ...infosValidation }).eq("id", id);
-    if (error) {
-      showToast("Erreur: " + error.message);
-      return;
-    }
-    if (statut === "confirmee") {
-      supabase.auth.getSession().then(({ data: sessionData }) => {
-        fetch("/api/facebook-capi", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionData.session?.access_token}` },
-          body: JSON.stringify({ commandeId: id }),
-        }).catch(() => {}); // silencieux — ne bloque jamais la confirmation si Facebook échoue
-      });
-    }
-    await loadOrders();
-    if (selected && selected.id === id) setSelected((s) => ({ ...s, statut, ...infosValidation }));
-    if (current && current.statut !== statut) {
-      logEvent(id, `📋 Statut : ${STATUS[current.statut]?.label || current.statut} → ${STATUS[statut]?.label || statut}${statut === "confirmee" ? ` par ${nomValidateur}` : ""}`);
-    }
-    if (vraimentRecuperee && current) {
-      setCelebration({ montant: current.montant, client: current.client });
-      playCelebrationSound();
-      setTimeout(() => setCelebration(null), 2600);
-    } else {
-      showToast("Statut mis à jour");
-    }
-  }
-
-  async function addOrder(order) {
-    // Détecte une commande très similaire déjà passée récemment (même client, même produit)
-    // — évite d'envoyer deux livreurs pour la même personne par erreur
-    const deuxHeuresAvant = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
-    const { data: doublonsPotentiels } = await supabase
-      .from("commandes")
-      .select("id, produit, created_at, statut")
-      .eq("tel", order.tel)
-      .neq("statut", "echouee")
-      .gte("created_at", deuxHeuresAvant);
-
-    const doublon = (doublonsPotentiels || []).find((d) =>
-      d.produit?.toLowerCase().includes((order.produit || "").toLowerCase().split(" ")[0])
-    );
-
-    if (doublon) {
-      const minutesEcoulees = Math.round((Date.now() - new Date(doublon.created_at).getTime()) / 60000);
-      const continuer = window.confirm(
-        `⚠️ Ce client a déjà une commande similaire en cours, passée il y a ${minutesEcoulees} min.\n\nContinuer quand même et créer une deuxième commande ?`
-      );
-      if (!continuer) return;
-    }
-
-    const { error } = await supabase.from("commandes").insert([
-      { ...order, montant: Number(order.montant), frais_expedition: Number(order.frais_expedition) || 0, montant_depot: Number(order.montant_depot) || 0, depot_recu_le: order.depot_recu ? new Date().toISOString() : null, recupere: false },
-    ]);
-    if (error) {
-      showToast("Erreur: " + error.message);
-      return;
-    }
-    await loadOrders();
-    setShowAdd(false);
-    showToast("Commande ajoutée");
-  }
-
-  async function addLivreur(livreur) {
-    const { error } = await supabase.from("livreurs").insert([livreur]);
-    if (error) {
-      showToast("Erreur: " + error.message);
-      return;
-    }
-    await loadLivreurs();
-    setShowAddLivreur(false);
-    showToast("Livreur ajouté");
-  }
-
-  async function deleteLivreur(id) {
-    const { error } = await supabase.from("livreurs").delete().eq("id", id);
-    if (error) {
-      showToast("Erreur: " + error.message);
-      return;
-    }
-    await loadLivreurs();
-    showToast("Livreur retiré");
-  }
-
-  async function toggleModeSimplifieLivreur(id, valeurActuelle) {
-    await supabase.from("livreurs").update({ mode_simplifie: !valeurActuelle }).eq("id", id);
-    await loadLivreurs();
-  }
-
-  async function assignLivreur(orderId, livreurNom) {
-    const { error } = await supabase.from("commandes").update({ livreur: livreurNom }).eq("id", orderId);
-    if (error) {
-      showToast("Erreur: " + error.message);
-      return;
-    }
-    await loadOrders();
-    if (selected && selected.id === orderId) setSelected((s) => ({ ...s, livreur: livreurNom }));
-    logEvent(orderId, livreurNom ? `🚚 Livreur assigné : ${livreurNom}` : "🚚 Livreur retiré");
-  }
-
-  async function addCloser(closer) {
-    const { error } = await supabase.from("closers").insert([closer]);
-    if (error) {
-      showToast("Erreur: " + error.message);
-      return;
-    }
-    await loadClosers();
-    setShowAddCloser(false);
-    showToast("Closer ajouté");
-  }
-
-  async function deleteCloser(id) {
-    const { error } = await supabase.from("closers").delete().eq("id", id);
-    if (error) {
-      showToast("Erreur: " + error.message);
-      return;
-    }
-    await loadClosers();
-    showToast("Closer retiré");
-  }
-
-  async function addComptable(comptable) {
-    const { error } = await supabase.from("comptables").insert([comptable]);
-    if (error) {
-      showToast("Erreur: " + error.message);
-      return;
-    }
-    await loadComptables();
-    setShowAddComptable(false);
-    showToast("Comptable ajouté");
-  }
-
-  async function deleteComptable(id) {
-    const { error } = await supabase.from("comptables").delete().eq("id", id);
-    if (error) {
-      showToast("Erreur: " + error.message);
-      return;
-    }
-    await loadComptables();
-    showToast("Comptable retiré");
-  }
-
-  async function addProduit(produit) {
-    const { error } = await supabase.from("produits").insert([{ nom: produit.nom, cout_achat: Number(produit.cout_achat) }]);
-    if (error) {
-      showToast("Erreur: " + error.message);
-      return;
-    }
-    await loadProduits();
-    setShowAddProduit(false);
-    showToast("Produit ajouté");
-  }
-
-  async function updateProduitCout(id, cout_achat) {
-    const { error } = await supabase.from("produits").update({ cout_achat: Number(cout_achat) }).eq("id", id);
-    if (error) {
-      showToast("Erreur: " + error.message);
-      return;
-    }
-    await loadProduits();
-  }
-
-  async function updateProduitStock(id, stock_initial) {
-    const { error } = await supabase.from("produits").update({ stock_initial: Number(stock_initial) }).eq("id", id);
-    if (error) {
-      showToast("Erreur: " + error.message);
-      return;
-    }
-    await loadProduits();
-  }
-
-  async function deleteProduit(id) {
-    const { error } = await supabase.from("produits").delete().eq("id", id);
-    if (error) {
-      showToast("Erreur: " + error.message);
-      return;
-    }
-    await loadProduits();
-    showToast("Produit retiré du catalogue");
-  }
-
-  async function assignCloser(orderId, closerNom) {
-    const { error } = await supabase.from("commandes").update({ closer: closerNom }).eq("id", orderId);
-    if (error) {
-      showToast("Erreur: " + error.message);
-      return;
-    }
-    await loadOrders();
-    if (selected && selected.id === orderId) setSelected((s) => ({ ...s, closer: closerNom }));
-    logEvent(orderId, closerNom ? `🎧 Closer assigné : ${closerNom}` : "🎧 Closer retiré");
-  }
-
-  async function seAttribuerCommande(orderId, closerNom) {
-    const { data, error } = await supabase
-      .from("commandes")
-      .update({ closer: closerNom })
-      .eq("id", orderId)
-      .is("closer", null)
-      .select();
-
-    if (error) {
-      showToast("Erreur: " + error.message);
-      return;
-    }
-    if (!data || data.length === 0) {
-      showToast("⚠️ Trop tard, un autre closer vient de la prendre");
-      await loadOrders();
-      return;
-    }
-    logEvent(orderId, `🎧 Prise en charge par ${closerNom}`);
-    await loadOrders();
-    showToast("✅ Commande attribuée, à toi de jouer !");
-  }
-
-  async function rescheduleOrder(orderId, date) {
-    const { error } = await supabase.from("commandes").update({ date_relivraison: date || null }).eq("id", orderId);
-    if (error) {
-      showToast("Erreur: " + error.message);
-      return;
-    }
-    await loadOrders();
-    if (selected && selected.id === orderId) setSelected((s) => ({ ...s, date_relivraison: date }));
-    if (date) {
-      logEvent(orderId, `📅 Livraison reprogrammée au ${new Date(date + "T00:00:00").toLocaleDateString("fr-FR")}`);
-    }
-    showToast("Date de livraison mise à jour");
-  }
-
-  async function updateOrderInfos(orderId, infos) {
-    const { error } = await supabase.from("commandes").update(infos).eq("id", orderId);
-    if (error) {
-      showToast("Erreur: " + error.message);
-      return;
-    }
-    await loadOrders();
-    if (selected && selected.id === orderId) setSelected((s) => ({ ...s, ...infos }));
-    logEvent(orderId, `✏️ Informations modifiées`);
-    showToast("Commande mise à jour");
-  }
-
-  async function marquerDepot(orderId, montant) {
-    const infos = { depot_recu: true, montant_depot: montant, depot_recu_le: new Date().toISOString() };
-    const { error } = await supabase.from("commandes").update(infos).eq("id", orderId);
-    if (error) {
-      showToast("Erreur: " + error.message);
-      return;
-    }
-    await loadOrders();
-    if (selected && selected.id === orderId) setSelected((s) => ({ ...s, ...infos }));
-    logEvent(orderId, `💰 Dépôt reçu : ${montant.toLocaleString("fr-FR")} FCFA`);
-    showToast("Dépôt enregistré");
-  }
-
-  async function logEvent(orderId, note) {
-    await supabase.from("relances").insert([{ commande_id: orderId, note }]);
-    loadRelances();
-  }
-
-  async function logRelance(orderId, note) {
-    await supabase.from("relances").insert([{ commande_id: orderId, note }]);
-    await loadRelances();
-  }
-
-  const livreursStats = useMemo(() => {
-    const stats = livreurs.map((l) => {
-      const mesCommandes = ordersInRange.filter((o) => o.livreur === l.nom);
-      const livrees = mesCommandes.filter((o) => o.statut === "confirmee");
-      const echouees = mesCommandes.filter((o) => o.statut === "echouee");
-      const total = mesCommandes.length;
-      const taux = total ? Math.round((livrees.length / total) * 100) : null;
-      const montantRecupere = livrees.reduce((s, o) => s + Number(o.montant), 0);
-      const montantPerdu = echouees.reduce((s, o) => s + Number(o.montant), 0);
-      const montantDu = livrees.length * 1500;
-      const montantADeposer = montantRecupere - montantDu;
-
-      const detailProduits = {};
-      mesCommandes.forEach((o) => {
-        const { nom, quantite } = parseProduitTexte(o.produit);
-        if (!nom) return;
-        if (!detailProduits[nom]) detailProduits[nom] = { nom, assignes: 0, livres: 0, restants: 0 };
-        detailProduits[nom].assignes += quantite;
-        if (o.statut === "confirmee") {
-          detailProduits[nom].livres += quantite;
-        } else {
-          detailProduits[nom].restants += quantite;
-        }
-      });
-      const produitsDetail = Object.values(detailProduits).sort((a, b) => b.assignes - a.assignes);
-
-      return { ...l, total, livrees: livrees.length, echouees: echouees.length, taux, montantRecupere, montantPerdu, montantDu, montantADeposer, produitsDetail };
-    });
-    return stats.sort((a, b) => (b.taux ?? -1) - (a.taux ?? -1));
-  }, [livreurs, ordersInRange]);
-
-  const closersStats = useMemo(() => {
-    const stats = closers.map((c) => {
-      const mesCommandes = ordersInRange.filter((o) => o.closer === c.nom);
-      const confirmees = mesCommandes.filter((o) => o.statut === "confirmee");
-      const echouees = mesCommandes.filter((o) => o.statut === "echouee");
-      const enCours = mesCommandes.filter((o) => o.statut === "en_cours");
-      const total = mesCommandes.length;
-      const taux = total ? Math.round((confirmees.length / total) * 100) : null;
-      const montantRecupere = confirmees.reduce((s, o) => s + Number(o.montant), 0);
-
-      const detailProduits = {};
-      mesCommandes.forEach((o) => {
-        const { nom, quantite } = parseProduitTexte(o.produit);
-        if (!nom) return;
-        if (!detailProduits[nom]) detailProduits[nom] = { nom, assignes: 0, livres: 0, restants: 0 };
-        detailProduits[nom].assignes += quantite;
-        if (o.statut === "confirmee") {
-          detailProduits[nom].livres += quantite;
-        } else {
-          detailProduits[nom].restants += quantite;
-        }
-      });
-      const produitsDetail = Object.values(detailProduits).sort((a, b) => b.assignes - a.assignes);
-
-      return { ...c, total, confirmees: confirmees.length, echouees: echouees.length, enCours: enCours.length, taux, montantRecupere, produitsDetail };
-    });
-    return stats.sort((a, b) => (b.taux ?? -1) - (a.taux ?? -1));
-  }, [closers, ordersInRange]);
-
-  const commandesNonAssignees = useMemo(() => orders.filter((o) => !o.closer && (o.statut === "en_cours" || o.statut === "echouee")).length, [orders]);
-
-  const repartitionCloserLivreur = useMemo(() => {
+  const produitsParLivreur = {};
+  depotsParLivreur.forEach((l) => {
+    const mesConfirmees = confirmees.filter((c) => c.livreur === l.nom);
     const map = {};
-    ordersInRange.forEach((o) => {
-      if (!o.closer || !o.livreur) return;
-      const key = o.closer + "|||" + o.livreur;
-      if (!map[key]) map[key] = { closer: o.closer, livreur: o.livreur, total: 0, produits: {} };
-      map[key].total += 1;
-      const { nom, quantite } = parseProduitTexte(o.produit);
-      if (nom) map[key].produits[nom] = (map[key].produits[nom] || 0) + quantite;
-    });
-    return Object.values(map)
-      .map((r) => ({ ...r, produitsListe: Object.entries(r.produits).map(([nom, qte]) => ({ nom, qte })).sort((a, b) => b.qte - a.qte) }))
-      .sort((a, b) => b.total - a.total);
-  }, [ordersInRange]);
-
-  const periodLabel = useMemo(() => {
-    const labels = { aujourdhui: "Aujourd'hui", hier: "Hier", semaine: "Cette semaine", mois: "Ce mois", personnalise: "Période personnalisée" };
-    return labels[datePreset] || "";
-  }, [datePreset]);
-
-  const clients = useMemo(() => {
-    const map = {};
-    orders.forEach((o) => {
-      const key = o.tel || o.client;
-      if (!map[key]) {
-        map[key] = { nom: o.client, tel: o.tel, zone: o.zone, commandes: [] };
-      }
-      map[key].commandes.push(o);
-    });
-    return Object.values(map)
-      .map((c) => {
-        const produitCount = {};
-        c.commandes.forEach((o) => {
-          const p = (o.produit || "").split(" x")[0].trim();
-          if (p) produitCount[p] = (produitCount[p] || 0) + 1;
-        });
-        const produitPrefere = Object.entries(produitCount).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
-
-        const confirmeesTriees = c.commandes
-          .filter((o) => o.statut === "confirmee")
-          .map((o) => new Date(o.created_at))
-          .sort((a, b) => a - b);
-
-        let intervalleMoyen = null;
-        let joursDepuisDernier = null;
-        let joursDeRetard = null;
-        if (confirmeesTriees.length >= 2) {
-          const intervalles = [];
-          for (let i = 1; i < confirmeesTriees.length; i++) {
-            intervalles.push((confirmeesTriees[i] - confirmeesTriees[i - 1]) / 86400000);
-          }
-          intervalleMoyen = Math.round(intervalles.reduce((s, v) => s + v, 0) / intervalles.length);
-          const dernier = confirmeesTriees[confirmeesTriees.length - 1];
-          joursDepuisDernier = Math.round((new Date() - dernier) / 86400000);
-          joursDeRetard = joursDepuisDernier - intervalleMoyen;
-        }
-
-        return {
-          ...c,
-          total: c.commandes.length,
-          confirmees: c.commandes.filter((o) => o.statut === "confirmee").length,
-          echouees: c.commandes.filter((o) => o.statut === "echouee").length,
-          montantTotal: c.commandes.reduce((s, o) => s + (o.recupere ? Number(o.montant) : 0), 0),
-          produitPrefere,
-          intervalleMoyen,
-          joursDepuisDernier,
-          joursDeRetard,
-        };
-      })
-      .sort((a, b) => b.montantTotal - a.montantTotal);
-  }, [orders]);
-
-  const clientsARelancer = useMemo(() => {
-    return clients
-      .filter((c) => c.joursDeRetard !== null && c.joursDeRetard >= 0)
-      .sort((a, b) => b.joursDeRetard - a.joursDeRetard);
-  }, [clients]);
-
-  const produits = useMemo(() => {
-    const map = {};
-    ordersInRange.forEach((o) => {
-      const nomProduit = (o.produit || "Autre").split(" x")[0].trim();
-      if (!map[nomProduit]) map[nomProduit] = { nom: nomProduit, ventes: 0, revenus: 0, livrees: 0 };
-      map[nomProduit].ventes += 1;
-      map[nomProduit].revenus += Number(o.montant);
-      if (o.statut === "confirmee") map[nomProduit].livrees += 1;
-    });
-    return Object.values(map).sort((a, b) => b.ventes - a.ventes);
-  }, [ordersInRange]);
-
-  const produitsQuantiteDetail = useMemo(() => {
-    const map = {};
-    ordersInRange.forEach((o) => {
-      const { nom, quantite } = parseProduitTexte(o.produit);
+    mesConfirmees.forEach((c) => {
+      const { nom, quantite } = parseProduitTexteLocal(c.produit);
       if (!nom) return;
-      if (!map[nom]) map[nom] = { nom, assignes: 0, livres: 0, restants: 0 };
-      map[nom].assignes += quantite;
-      if (o.statut === "confirmee") map[nom].livres += quantite;
-      else map[nom].restants += quantite;
+      if (!map[nom]) map[nom] = { nom, pieces: 0, ca: 0 };
+      map[nom].pieces += quantite;
+      map[nom].ca += Number(c.montant);
     });
-    return Object.values(map).sort((a, b) => b.assignes - a.assignes);
-  }, [ordersInRange]);
-
-  const meilleurProduit = produits[0] || null;
-  const produitPlusRentable = produits.length ? [...produits].sort((a, b) => b.revenus - a.revenus)[0] : null;
-  const meilleurLivreur = livreursStats.length ? [...livreursStats].sort((a, b) => (b.taux ?? -1) - (a.taux ?? -1))[0] : null;
-
-  const quantitesParProduit = useMemo(() => {
-    const map = {};
-    orders.forEach((o) => {
-      const { nom, quantite } = parseProduitTexte(o.produit);
-      if (!nom) return;
-      if (!map[nom]) map[nom] = { commandees: 0, livrees: 0 };
-      if (o.statut !== "echouee") map[nom].commandees += quantite;
-      if (o.statut === "confirmee") map[nom].livrees += quantite;
-    });
-    return map;
-  }, [orders]);
-
-  const anomaliesProduitZone = useMemo(() => {
-    const traites = orders.filter((o) => o.statut === "confirmee" || o.statut === "echouee");
-
-    const globalParProduit = {};
-    traites.forEach((o) => {
-      const p = (o.produit || "").split(" x")[0].trim();
-      if (!p) return;
-      if (!globalParProduit[p]) globalParProduit[p] = { total: 0, echecs: 0 };
-      globalParProduit[p].total += 1;
-      if (o.statut === "echouee") globalParProduit[p].echecs += 1;
-    });
-
-    const parProduitZone = {};
-    traites.forEach((o) => {
-      const p = (o.produit || "").split(" x")[0].trim();
-      const z = (o.zone || "").trim();
-      if (!p || !z) return;
-      const key = p + "|||" + z;
-      if (!parProduitZone[key]) parProduitZone[key] = { produit: p, zone: z, total: 0, echecs: 0 };
-      parProduitZone[key].total += 1;
-      if (o.statut === "echouee") parProduitZone[key].echecs += 1;
-    });
-
-    const anomalies = [];
-    Object.values(parProduitZone).forEach((g) => {
-      if (g.total < 5) return;
-      const tauxLocal = g.echecs / g.total;
-      const global = globalParProduit[g.produit];
-      const tauxGlobal = global && global.total > 0 ? global.echecs / global.total : 0;
-      const ecartPoints = (tauxLocal - tauxGlobal) * 100;
-      if (ecartPoints >= 15 && tauxLocal >= tauxGlobal * 1.5) {
-        anomalies.push({
-          produit: g.produit,
-          zone: g.zone,
-          total: g.total,
-          tauxLocal: Math.round(tauxLocal * 100),
-          tauxGlobal: Math.round(tauxGlobal * 100),
-        });
-      }
-    });
-
-    return anomalies.sort((a, b) => b.tauxLocal - a.tauxLocal);
-  }, [orders]);
-
-  if (session === undefined) {
-    return (
-      <div style={{ background: "#FAFAF7", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'IBM Plex Sans', sans-serif" }}>
-        Chargement…
-      </div>
-    );
-  }
-
-  if (!session) {
-    return <LoginScreen />;
-  }
-
-  if (!loaded) {
-    return (
-      <div style={{ background: "#FAFAF7", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'IBM Plex Sans', sans-serif" }}>
-        Chargement…
-      </div>
-    );
-  }
-
-  const monProfilLivreur = livreurs.find((l) => l.email && l.email.toLowerCase() === session.user.email.toLowerCase());
-
-  if (monProfilLivreur && !error) {
-    return (
-      <LivreurPortal
-        livreur={monProfilLivreur}
-        orders={orders.filter((o) => o.livreur === monProfilLivreur.nom)}
-        onStatus={updateStatus}
-        toast={toast}
-      />
-    );
-  }
-
-  const monProfilCloser = closers.find((c) => c.email && c.email.toLowerCase() === session.user.email.toLowerCase());
-
-  const monProfilComptable = comptables.find((c) => c.email && c.email.toLowerCase() === session.user.email.toLowerCase());
-
-  if (monProfilComptable && !error) {
-    return (
-      <ComptablePortal
-        comptable={monProfilComptable}
-        orders={orders}
-        livreurs={livreurs}
-      />
-    );
-  }
-
-  if (error) {
-    return (
-      <div style={{ background: "#FAFAF7", minHeight: "100vh", padding: 24, fontFamily: "'IBM Plex Sans', sans-serif" }}>
-        <div style={{ background: "#FBEAE6", border: "1px solid #F0B8AC", borderRadius: 12, padding: 16, color: "#D64933" }}>
-          <strong>Connexion à la base de données impossible.</strong>
-          <div style={{ fontSize: 13, marginTop: 6 }}>{error}</div>
-        </div>
-        <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
-          <button
-            onClick={async () => {
-              const { data } = await supabase.auth.refreshSession();
-              if (data.session) { setSession(data.session); loadOrders(); loadLivreurs(); }
-            }}
-            style={{ flex: 1, padding: "12px 0", borderRadius: 10, border: "none", background: "#1a7a3c", color: "white", fontWeight: 600, fontSize: 14 }}
-          >
-            Réessayer
-          </button>
-          <button
-            onClick={() => supabase.auth.signOut()}
-            style={{ flex: 1, padding: "12px 0", borderRadius: 10, border: "1px solid #DDD8CC", background: "white", color: "#16231F", fontWeight: 600, fontSize: 14 }}
-          >
-            Se reconnecter
-          </button>
-        </div>
-      </div>
-    );
-  }
+    produitsParLivreur[l.nom] = Object.values(map).sort((a, b) => b.ca - a.ca);
+  });
 
   return (
-    <div className="rv-app" style={{ background: "#FAFAF7", minHeight: "100vh", fontFamily: "'IBM Plex Sans', sans-serif", color: "#16231F", paddingBottom: 76 }}>
+    <div className="rv-saas-print-scope" style={{ minHeight: "100vh", background: "#FAFAF7", fontFamily: "'IBM Plex Sans', sans-serif", padding: 24 }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');
-        * { box-sizing: border-box; }
-        .rv-app { width: 100%; position: relative; }
-        button { font-family: inherit; cursor: pointer; transition: transform 0.12s ease, opacity 0.12s ease, background 0.15s ease, border-color 0.15s ease; }
-        button:active { transform: scale(0.97); }
-        .rv-sidebar button, .rv-bottomnav button { transition: background 0.18s ease, color 0.18s ease; }
-        .rv-fadein { animation: rvFadeIn 0.28s ease; }
-        @keyframes rvFadeIn {
-          from { opacity: 0; transform: translateY(6px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        .rv-card-anim { animation: rvFadeIn 0.22s ease backwards; }
-        .rv-modal-sheet { animation: rvSlideUp 0.22s cubic-bezier(0.16, 1, 0.3, 1); }
-        @keyframes rvSlideUp {
-          from { transform: translateY(100%); }
-          to { transform: translateY(0); }
-        }
-        .rv-modal-backdrop { animation: rvFadeIn 0.18s ease; }
-        .rv-celebrate-in { animation: rvCelebrateIn 0.45s cubic-bezier(0.34, 1.56, 0.64, 1); }
-        @keyframes rvCelebrateIn {
-          0% { opacity: 0; transform: scale(0.5) translateY(20px); }
-          60% { opacity: 1; transform: scale(1.08) translateY(-4px); }
-          100% { opacity: 1; transform: scale(1) translateY(0); }
-        }
-        .rv-celebrate-out { animation: rvCelebrateOut 0.35s ease forwards; }
-        @keyframes rvCelebrateOut {
-          from { opacity: 1; transform: scale(1); }
-          to { opacity: 0; transform: scale(0.92) translateY(-10px); }
-        }
-        .rv-confetti { animation: rvConfetti 1.4s ease-out forwards; }
-        @keyframes rvConfetti {
-          0% { transform: translateY(0) rotate(0deg); opacity: 1; }
-          100% { transform: translateY(90px) rotate(360deg); opacity: 0; }
-        }
-        .rv-livedot { animation: rvPulseDot 2s ease-in-out infinite; }
-        @keyframes rvPulseDot {
-          0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(127,214,163,0.5); }
-          50% { opacity: 0.5; box-shadow: 0 0 0 4px rgba(127,214,163,0); }
-        }
-        .rv-glow { animation: rvGlowBreathe 4s ease-in-out infinite; }
-        @keyframes rvGlowBreathe {
-          0%, 100% { opacity: 0.5; transform: scale(1); }
-          50% { opacity: 1; transform: scale(1.15); }
-        }
-        .rv-mesh-blob {
-          position: absolute;
-          border-radius: 50%;
-          filter: blur(40px);
-          pointer-events: none;
-        }
-        .rv-mesh-1 {
-          width: 180px; height: 180px;
-          background: radial-gradient(circle, rgba(232,146,10,0.45) 0%, rgba(232,146,10,0) 70%);
-          top: -60px; right: -40px;
-          animation: rvMeshFloat1 9s ease-in-out infinite;
-        }
-        .rv-mesh-2 {
-          width: 140px; height: 140px;
-          background: radial-gradient(circle, rgba(127,214,163,0.4) 0%, rgba(127,214,163,0) 70%);
-          bottom: -50px; left: 10%;
-          animation: rvMeshFloat2 11s ease-in-out infinite;
-        }
-        .rv-mesh-3 {
-          width: 110px; height: 110px;
-          background: radial-gradient(circle, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0) 70%);
-          top: 20%; right: 25%;
-          animation: rvMeshFloat3 7s ease-in-out infinite;
-        }
-        @keyframes rvMeshFloat1 {
-          0%, 100% { transform: translate(0, 0) scale(1); }
-          50% { transform: translate(-20px, 20px) scale(1.15); }
-        }
-        @keyframes rvMeshFloat2 {
-          0%, 100% { transform: translate(0, 0) scale(1); }
-          50% { transform: translate(25px, -15px) scale(1.1); }
-        }
-        @keyframes rvMeshFloat3 {
-          0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.6; }
-          50% { transform: translate(-15px, -10px) scale(1.3); opacity: 1; }
-        }
-        .rv-glass-card {
-          position: relative;
-          overflow: hidden;
-          border-radius: 12px;
-          padding: 11px 13px;
-          background: linear-gradient(155deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.06) 60%, rgba(255,255,255,0.1) 100%);
-          border: 1px solid rgba(255,255,255,0.25);
-          box-shadow: 0 4px 14px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.3), inset 0 -1px 0 rgba(0,0,0,0.08);
-          backdrop-filter: blur(6px);
-        }
-        .rv-glass-shine {
-          position: absolute;
-          top: -50%;
-          left: -60%;
-          width: 60%;
-          height: 200%;
-          background: linear-gradient(120deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.35) 50%, rgba(255,255,255,0) 100%);
-          transform: rotate(20deg);
-          animation: rvShineSweep 3.5s ease-in-out infinite;
-          pointer-events: none;
-        }
-        @keyframes rvShineSweep {
-          0% { left: -60%; }
-          35%, 100% { left: 140%; }
-        }
-        .rv-wave-1 { animation: rvWaveDrift 9s linear infinite; }
-        .rv-wave-2 { animation: rvWaveDrift 14s linear infinite reverse; }
-        .rv-wave-3 { animation: rvWaveDrift 20s linear infinite; }
-        @keyframes rvWaveDrift {
-          from { transform: translateX(0); }
-          to { transform: translateX(-50%); }
-        }
-        .rv-3d-card { animation: rv3DFloat 6s ease-in-out infinite; transform-style: preserve-3d; }
-        @keyframes rv3DFloat {
-          0%, 100% { transform: rotateX(0deg) rotateY(0deg) translateZ(0); }
-          25% { transform: rotateX(3deg) rotateY(-4deg) translateZ(6px); }
-          50% { transform: rotateX(0deg) rotateY(0deg) translateZ(0); }
-          75% { transform: rotateX(-3deg) rotateY(4deg) translateZ(6px); }
-        }
-        .rv-3d-card-light { animation: rv3DFloatLight 7s ease-in-out infinite; transform-style: preserve-3d; }
-        @keyframes rv3DFloatLight {
-          0%, 100% { transform: rotateX(0deg) rotateY(0deg) translateY(0); box-shadow: 0 6px 16px rgba(22,35,31,0.06); }
-          50% { transform: rotateX(2deg) rotateY(-2.5deg) translateY(-2px); box-shadow: 0 12px 24px rgba(22,35,31,0.1); }
-        }
-        .rv-sidebar { display: none; }
-        .rv-content-wrap { }
-        @media (min-width: 900px) {
-          .rv-app { padding-bottom: 0 !important; }
-          .rv-bottomnav { display: none !important; }
-          .rv-fab { display: none !important; }
-          .rv-mobile-only-logout { display: none !important; }
-          .rv-sidebar {
-            display: flex;
-            position: fixed;
-            top: 0;
-            left: 0;
-            bottom: 0;
-            width: 220px;
-            background: #16231F;
-            flex-direction: column;
-            padding: 24px 14px;
-            z-index: 30;
-          }
-          .rv-content-wrap {
-            margin-left: 220px;
-            max-width: none;
-            padding: 0 32px;
-          }
+        @keyframes rvPulseDot { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @media print {
+          .rv-saas-no-print { display: none !important; }
+          .rv-saas-print-only { display: block !important; }
+          body { background: white !important; }
+          * { box-shadow: none !important; }
         }
       `}</style>
 
-      <div className="rv-sidebar">
-        <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 32, padding: "0 8px" }}>
-          <div style={{ width: 26, height: 26, borderRadius: 7, background: "rgba(255,255,255,0.1)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-            <svg width="15" height="15" viewBox="0 0 100 100">
-              <polyline points="15,62 40,42 55,56 85,28" stroke="#e8920a" strokeWidth="11" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </div>
-          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 17, color: "white" }}>
-            RECU<span style={{ color: "#e8920a" }}>VENTE</span>
-          </div>
-        </div>
-        {[
-          { key: "dashboard", label: "Commandes", icon: Package },
-          { key: "today", label: "Aujourd'hui", icon: ListChecks },
-          { key: "validations", label: "Validations", icon: CheckCheck },
-          { key: "clients", label: "Clients", icon: Users },
-          { key: "livreurs", label: "Livreurs", icon: Truck },
-          { key: "closers", label: "Closers", icon: Headset },
-        ].filter((t) => !monProfilCloser || t.key !== "closers").map((t) => {
-          const Icon = t.icon;
-          const active = view === t.key;
-          return (
-            <button
-              key={t.key}
-              onClick={() => setView(t.key)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 11,
-                padding: "11px 12px",
-                borderRadius: 9,
-                border: "none",
-                background: active ? "rgba(255,255,255,0.1)" : "transparent",
-                color: active ? "white" : "rgba(255,255,255,0.6)",
-                fontSize: 14,
-                fontWeight: active ? 600 : 500,
-                textAlign: "left",
-                marginBottom: 3,
-              }}
-            >
-              <Icon size={18} />
-              {t.label}
+      <div className="rv-saas-no-print" style={{ background: "#16231F", color: "white", padding: 20, borderRadius: 14, marginBottom: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ fontSize: 13, opacity: 0.75 }}>🧮 Comptabilité — {workspace.name}</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => window.print()} style={{ background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: "6px 10px", borderRadius: 7, fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
+              🖨️
             </button>
-          );
-        })}
-        <div style={{ marginTop: "auto", padding: "0 12px" }}>
-          <button
-            onClick={() => (view === "livreurs" ? setShowAddLivreur(true) : view === "closers" ? setShowAddCloser(true) : setShowAdd(true))}
-            style={{ width: "100%", padding: "10px 0", borderRadius: 9, border: "none", background: "#e8920a", color: "#16231F", fontWeight: 700, fontSize: 13.5, display: (view === "clients" || (view === "livreurs" && monProfilCloser)) ? "none" : "flex", alignItems: "center", justifyContent: "center", gap: 6, marginBottom: 8 }}
-          >
-            <Plus size={16} /> Ajouter
-          </button>
-          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginBottom: 8, padding: "0 2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {session.user.email}
-          </div>
-          {session.user.email === ADMIN_EMAIL && (
-            <>
-              <button
-                onClick={() => setShowInvite(true)}
-                style={{ width: "100%", padding: "8px 0", borderRadius: 9, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "rgba(255,255,255,0.75)", fontWeight: 500, fontSize: 12.5, marginBottom: 6, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
-              >
-                <Users size={13} /> Inviter quelqu'un
-              </button>
-              <button
-                onClick={() => setShowTeam(true)}
-                style={{ width: "100%", padding: "8px 0", borderRadius: 9, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "rgba(255,255,255,0.75)", fontWeight: 500, fontSize: 12.5, marginBottom: 6, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
-              >
-                <Users size={13} /> Gérer l'équipe
-              </button>
-              <button
-                onClick={() => setShowCampagne(true)}
-                style={{ width: "100%", padding: "8px 0", borderRadius: 9, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "rgba(255,255,255,0.75)", fontWeight: 500, fontSize: 12.5, marginBottom: 6, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
-              >
-                <MessageCircle size={13} /> Campagne promo
-              </button>
-              <button
-                onClick={() => setShowComptables(true)}
-                style={{ width: "100%", padding: "8px 0", borderRadius: 9, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "rgba(255,255,255,0.75)", fontWeight: 500, fontSize: 12.5, marginBottom: 6, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
-              >
-                🧮 Gérer comptables
-              </button>
-              <button
-                onClick={() => setShowProduits(true)}
-                style={{ width: "100%", padding: "8px 0", borderRadius: 9, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "rgba(255,255,255,0.75)", fontWeight: 500, fontSize: 12.5, marginBottom: 6, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
-              >
-                📦 Catalogue produits
-              </button>
-            </>
-          )}
-          <button
-            onClick={() => supabase.auth.signOut()}
-            style={{ width: "100%", padding: "8px 0", borderRadius: 9, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "rgba(255,255,255,0.6)", fontWeight: 500, fontSize: 12.5 }}
-          >
-            Se déconnecter
-          </button>
-        </div>
-      </div>
-
-      <div className="rv-content-wrap">
-
-      {view === "dashboard" && (
-      <>
-      <div style={{ background: "#1a7a3c", color: "#FAFAF7", padding: "20px 16px 24px", position: "relative", overflow: "hidden" }}>
-        <div className="rv-mesh-blob rv-mesh-1" />
-        <div className="rv-mesh-blob rv-mesh-2" />
-        <div className="rv-mesh-blob rv-mesh-3" />
-
-        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 90, overflow: "hidden", pointerEvents: "none" }}>
-          <svg className="rv-wave rv-wave-1" viewBox="0 0 400 60" preserveAspectRatio="none" style={{ position: "absolute", bottom: -5, width: "200%", height: 70 }}>
-            <path d="M0,30 C40,10 80,50 120,30 C160,10 200,50 240,30 C280,10 320,50 360,30 C380,20 390,25 400,30 L400,60 L0,60 Z" fill="rgba(232,146,10,0.55)" />
-          </svg>
-          <svg className="rv-wave rv-wave-2" viewBox="0 0 400 60" preserveAspectRatio="none" style={{ position: "absolute", bottom: -8, width: "200%", height: 60 }}>
-            <path d="M0,25 C50,45 90,5 140,25 C190,45 230,5 280,25 C330,45 370,5 400,20 L400,60 L0,60 Z" fill="rgba(255,255,255,0.4)" />
-          </svg>
-          <svg className="rv-wave rv-wave-3" viewBox="0 0 400 60" preserveAspectRatio="none" style={{ position: "absolute", bottom: -3, width: "200%", height: 50 }}>
-            <path d="M0,35 C60,15 100,45 160,25 C220,5 260,45 320,25 C360,10 380,30 400,25 L400,60 L0,60 Z" fill="rgba(248,180,60,0.4)" />
-          </svg>
-        </div>
-        <div style={{ position: "relative", zIndex: 1 }}>
-        <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: 8, rowGap: 8 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-            <div style={{ width: 24, height: 24, borderRadius: 7, background: "rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-              <svg width="14" height="14" viewBox="0 0 100 100">
-                <polyline points="15,62 40,42 55,56 85,28" stroke="#e8920a" strokeWidth="11" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </div>
-            <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 17, letterSpacing: "-0.01em", whiteSpace: "nowrap" }}>
-              RECU<span style={{ color: "#e8920a" }}>VENTE</span>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 4, opacity: 0.65 }}>
-              <span className="rv-livedot" style={{ width: 6, height: 6, borderRadius: "50%", background: "#7fd6a3", display: "inline-block" }} />
-              <span style={{ fontSize: 9.5, fontWeight: 500, letterSpacing: "0.03em" }}>EN DIRECT</span>
-            </div>
-          </div>
-          <div className="rv-mobile-only-logout" style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-end", alignItems: "center", gap: 5, flexShrink: 0, rowGap: 6 }}>
-            {session.user.email === ADMIN_EMAIL && (
-              <>
-                <button
-                  onClick={() => setShowInvite(true)}
-                  aria-label="Inviter"
-                  style={{ background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: 7, borderRadius: 7, display: "flex" }}
-                >
-                  <UserPlus size={15} />
-                </button>
-                <button
-                  onClick={() => setShowTeam(true)}
-                  aria-label="Équipe"
-                  style={{ background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: 7, borderRadius: 7, display: "flex" }}
-                >
-                  <Users size={15} />
-                </button>
-                <button
-                  onClick={() => setShowCampagne(true)}
-                  aria-label="Campagne promo"
-                  style={{ background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: 7, borderRadius: 7, display: "flex" }}
-                >
-                  <MessageCircle size={15} />
-                </button>
-                <button
-                  onClick={() => setShowComptables(true)}
-                  aria-label="Comptables"
-                  style={{ background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: 7, borderRadius: 7, display: "flex", fontSize: 14 }}
-                >
-                  🧮
-                </button>
-                <button
-                  onClick={() => setShowProduits(true)}
-                  aria-label="Catalogue produits"
-                  style={{ background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: 7, borderRadius: 7, display: "flex", fontSize: 14 }}
-                >
-                  📦
-                </button>
-              </>
-            )}
-            <button
-              onClick={() => supabase.auth.signOut()}
-              aria-label="Déconnexion"
-              style={{ background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: 7, borderRadius: 7, display: "flex" }}
-            >
-              <LogOut size={15} />
+            <button onClick={() => supabase.auth.signOut()} style={{ background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: "6px 12px", borderRadius: 7, fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
+              Déconnexion
             </button>
           </div>
         </div>
-
-        <div style={{ marginTop: 22, perspective: "800px" }}>
-          <div className="rv-3d-card" style={{ position: "relative", padding: "14px 16px", borderRadius: 16, background: "linear-gradient(155deg, rgba(255,255,255,0.14) 0%, rgba(255,255,255,0.03) 70%)", border: "1px solid rgba(255,255,255,0.18)", boxShadow: "0 12px 30px rgba(0,0,0,0.22)" }}>
-            <div className="rv-glow" style={{ position: "absolute", top: -20, left: -20, width: 140, height: 140, borderRadius: "50%", background: "radial-gradient(circle, rgba(232,146,10,0.35) 0%, rgba(232,146,10,0) 70%)", pointerEvents: "none" }} />
-            <div style={{ fontSize: 12, opacity: 0.75, letterSpacing: "0.04em", textTransform: "uppercase", position: "relative" }}>Argent récupéré</div>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 38, marginTop: 4, color: "#e8920a", position: "relative" }}>
-              {formatFCFA(stats.recupere)}
-            </div>
-          </div>
-        </div>
-
-        <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
-          <div className="rv-glass-card" style={{ flex: 1 }}>
-            <div className="rv-glass-shine" />
-            <div style={{ fontSize: 11, opacity: 0.75, position: "relative" }}>À risque</div>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 21, position: "relative" }}>{stats.aRisque}</div>
-          </div>
-          <div className="rv-glass-card" style={{ flex: 1 }}>
-            <div className="rv-glass-shine" />
-            <div style={{ fontSize: 11, opacity: 0.75, position: "relative" }}>Taux livraison</div>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 21, position: "relative" }}>{stats.tauxLivraison}%</div>
-          </div>
-          <div className="rv-glass-card" style={{ flex: 1 }}>
-            <div className="rv-glass-shine" />
-            <div style={{ fontSize: 11, opacity: 0.75, position: "relative" }}>Total</div>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 21, position: "relative" }}>{stats.total}</div>
-          </div>
-        </div>
-        </div>
       </div>
 
-      <div style={{ margin: "14px 20px 0", display: "flex", gap: 7, overflowX: "auto", paddingBottom: 2 }}>
+      <div className="rv-saas-print-only" style={{ display: "none", marginBottom: 16 }}>
+        <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 20 }}>Rapport comptable — {workspace.name}</div>
+        <div style={{ fontSize: 12, color: "#6B7168" }}>Édité le {new Date().toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })} — {periodLabel}</div>
+      </div>
+
+      <div className="rv-saas-no-print" style={{ display: "flex", gap: 6, marginBottom: 16, overflowX: "auto" }}>
         {[
           { key: "aujourdhui", label: "Aujourd'hui" },
           { key: "hier", label: "Hier" },
@@ -1763,17 +5175,7 @@ export default function App() {
           <button
             key={d.key}
             onClick={() => setDatePreset(d.key)}
-            style={{
-              padding: "6px 13px",
-              borderRadius: 999,
-              border: "1px solid " + (datePreset === d.key ? "#1a7a3c" : "#DDD8CC"),
-              background: datePreset === d.key ? "#1a7a3c" : "white",
-              color: datePreset === d.key ? "white" : "#16231F",
-              fontSize: 12.5,
-              fontWeight: 500,
-              whiteSpace: "nowrap",
-              flexShrink: 0,
-            }}
+            style={{ padding: "6px 13px", borderRadius: 999, border: `1px solid ${datePreset === d.key ? "#1a7a3c" : "#DDD8CC"}`, background: datePreset === d.key ? "#1a7a3c" : "white", color: datePreset === d.key ? "white" : "#16231F", fontSize: 12.5, fontWeight: 500, whiteSpace: "nowrap", flexShrink: 0, cursor: "pointer" }}
           >
             {d.label}
           </button>
@@ -1781,520 +5183,378 @@ export default function App() {
       </div>
 
       {datePreset === "personnalise" && (
-        <div style={{ margin: "8px 20px 0", display: "flex", gap: 8, alignItems: "center" }}>
+        <div className="rv-saas-no-print" style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 16 }}>
           <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 13 }} />
           <span style={{ color: "#8A9089", fontSize: 12 }}>à</span>
           <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 13 }} />
         </div>
       )}
 
-      {notifPermission === "default" && (
-        <div style={{ margin: "14px 20px 0", background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 12, padding: "12px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-          <span style={{ fontSize: 12.5, color: "#8A6412" }}>🔔 Active les notifications pour être alerté des nouvelles commandes, même app fermée</span>
-          <button
-            onClick={activerNotificationsPush}
-            style={{ background: "#e8920a", color: "#16231F", border: "none", borderRadius: 8, padding: "7px 12px", fontSize: 12.5, fontWeight: 700, flexShrink: 0 }}
-          >
-            Activer
-          </button>
-        </div>
-      )}
+      <div style={{ display: "inline-block", fontSize: 11, fontWeight: 600, color: "#1a7a3c", background: "#EAF3DE", padding: "3px 10px", borderRadius: 999, marginBottom: 12 }}>
+        📊 {periodLabel}
+      </div>
 
-      <div style={{ margin: "14px 20px 0", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, perspective: "700px" }}>
-        <div className="rv-3d-card-light" style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "12px 14px", boxShadow: "0 6px 16px rgba(22,35,31,0.06)" }}>
-          <div style={{ fontSize: 11, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em" }}>Chiffre d'affaires</div>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 3 }}>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 18 }}>{formatFCFA(stats.chiffreAffaires)}</div>
-            {evolutionCA !== null && (
-              <span style={{ fontSize: 11, fontWeight: 700, color: evolutionCA >= 0 ? "#1F9D6E" : "#D64933" }}>
-                {evolutionCA >= 0 ? "+" : ""}{evolutionCA}%
-              </span>
-            )}
-          </div>
+      <div style={{ background: "linear-gradient(135deg, #16231F, #1e2f28)", borderRadius: 14, padding: "16px 18px", marginBottom: 12 }}>
+        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.65)", textTransform: "uppercase" }}>💰 Bénéfice réel</div>
+        <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 24, color: beneficeReel >= 0 ? "#7fd6a3" : "#f0a0a0", marginTop: 3 }}>
+          {beneficeReel.toLocaleString("fr-FR")} {workspace.currency}
         </div>
-        <div className="rv-3d-card-light" style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "12px 14px", boxShadow: "0 6px 16px rgba(22,35,31,0.06)", animationDelay: "-3s" }}>
-          <div style={{ fontSize: 11, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em" }}>Taux d'échec</div>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 18, marginTop: 3, color: "#D64933" }}>{stats.tauxEchec}%</div>
+        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", marginTop: 4 }}>
+          CA confirmé {caConfirme.toLocaleString("fr-FR")} − Livraisons ({confirmees.length} × {COUT_LIVRAISON.toLocaleString("fr-FR")}) − Produits ({coutProduitsInfo.coutTotal.toLocaleString("fr-FR")})
         </div>
       </div>
 
-      <div style={{ margin: "10px 20px 0" }}>
-        <button
-          onClick={() => setShowComptaDetail(true)}
-          className="rv-3d-card-light"
-          style={{ background: "linear-gradient(135deg, #16231F, #1e2f28)", borderRadius: 14, padding: "16px 18px", boxShadow: "0 8px 22px rgba(22,35,31,0.18)", animationDelay: "-1.5s", width: "100%", border: "none", textAlign: "left" }}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-            <div>
-              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.65)", textTransform: "uppercase", letterSpacing: "0.03em" }}>💰 Bénéfice réel</div>
-              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 26, marginTop: 3, color: stats.beneficeReel >= 0 ? "#7fd6a3" : "#f0a0a0" }}>
-                {formatFCFA(stats.beneficeReel)}
-              </div>
-            </div>
-            <div style={{ textAlign: "right", fontSize: 11, color: "rgba(255,255,255,0.55)" }}>
-              <div>− Livraisons : {stats.livrees} × {formatFCFA(COUT_LIVRAISON)}</div>
-              <div style={{ marginTop: 2 }}>− Produits : {formatFCFA(stats.coutProduitsTotal)}</div>
-              <div style={{ marginTop: 6, color: "#e8920a", fontWeight: 600 }}>Voir le détail →</div>
-            </div>
-          </div>
-          {stats.nbCoutInconnu > 0 && (
-            <div style={{ marginTop: 10, fontSize: 11, color: "#f0c060", background: "rgba(232,146,10,0.15)", padding: "6px 10px", borderRadius: 7 }}>
-              ⚠️ {stats.nbCoutInconnu} commande{stats.nbCoutInconnu > 1 ? "s" : ""} ({formatFCFA(stats.montantCoutInconnu)}) sans coût produit connu — non déduites, bénéfice sous-estimé
-            </div>
-          )}
-        </button>
+      {coutProduitsInfo.nbInconnu > 0 && (
+        <div style={{ background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 10, padding: "10px 12px", marginBottom: 12, fontSize: 12, color: "#8A6412" }}>
+          ⚠️ {coutProduitsInfo.nbInconnu} commande{coutProduitsInfo.nbInconnu > 1 ? "s" : ""} ({coutProduitsInfo.montantInconnu.toLocaleString("fr-FR")} {workspace.currency}) sans coût produit connu — bénéfice sous-estimé.
+        </div>
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
+        <div style={{ background: "linear-gradient(135deg, #16231F, #1e2f28)", borderRadius: 14, padding: "14px 16px" }}>
+          <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.65)", textTransform: "uppercase" }}>💵 À payer aux livreurs</div>
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 18, color: "#e8920a", marginTop: 3 }}>{totalCommission.toLocaleString("fr-FR")} {workspace.currency}</div>
+        </div>
+        <div style={{ background: "linear-gradient(135deg, #1a7a3c, #1F9D6E)", borderRadius: 14, padding: "14px 16px" }}>
+          <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.75)", textTransform: "uppercase" }}>🏦 Dépôt attendu</div>
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 18, color: "white", marginTop: 3 }}>{totalADeposer.toLocaleString("fr-FR")} {workspace.currency}</div>
+        </div>
       </div>
 
-      {clientsSuspects.length > 0 && (
-        <div style={{ margin: "14px 20px 0", background: "#FBEAE6", border: "1px solid #F0B8AC", borderRadius: 12, padding: "12px 14px" }}>
-          <div style={{ fontSize: 12.5, fontWeight: 700, color: "#D64933", marginBottom: 6 }}>⚠️ {clientsSuspects.length} client{clientsSuspects.length > 1 ? "s" : ""} avec 3+ échecs</div>
-          {clientsSuspects.slice(0, 3).map((c, i) => (
-            <div key={i} style={{ fontSize: 12, color: "#B23A22" }}>{c.nom} ({c.tel}) — {c.echouees} échecs sur {c.total}</div>
-          ))}
+      {livreurs.some((l) => l.en_tournee) && (
+        <div className="rv-saas-no-print" style={{ marginBottom: 20 }}>
+          <CarteLivreursSaas livreurs={livreurs} />
         </div>
       )}
 
-      {anomaliesProduitZone.length > 0 && (
-        <div style={{ margin: "14px 20px 0", background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 12, padding: "12px 14px" }}>
-          <div style={{ fontSize: 12.5, fontWeight: 700, color: "#8A6412", marginBottom: 8 }}>
-            📍 {anomaliesProduitZone.length} produit{anomaliesProduitZone.length > 1 ? "s" : ""} échoue{anomaliesProduitZone.length > 1 ? "nt" : ""} anormalement dans une zone précise
-          </div>
-          {anomaliesProduitZone.slice(0, 3).map((a, i) => (
-            <div key={i} style={{ fontSize: 12, color: "#8A6412", marginBottom: 3 }}>
-              <strong>{a.produit}</strong> à <strong>{a.zone}</strong> — {a.tauxLocal}% d'échec ici (contre {a.tauxGlobal}% ailleurs, sur {a.total} commandes)
-            </div>
-          ))}
-          <div style={{ fontSize: 10.5, color: "#8A6412", marginTop: 4, opacity: 0.8 }}>
-            Vérifie l'adresse, le livreur assigné, ou la disponibilité du produit dans cette zone.
-          </div>
-        </div>
-      )}
-
-      {stats.total > 0 && (
-        <div style={{ margin: "16px 20px 0", background: "white", border: "1px solid #ECE8DC", borderRadius: 14, padding: "18px 20px", display: "flex", alignItems: "center", gap: 20 }}>
-          <StatusDonut livrees={stats.livrees} enAttente={stats.enAttente} echouees={stats.echouees} />
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-              <span style={{ width: 9, height: 9, borderRadius: "50%", background: STATUS.confirmee.color, display: "inline-block" }} />
-              Livrées <span style={{ marginLeft: "auto", fontWeight: 600 }}>{stats.livrees}</span>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-              <span style={{ width: 9, height: 9, borderRadius: "50%", background: STATUS.en_cours.color, display: "inline-block" }} />
-              En attente <span style={{ marginLeft: "auto", fontWeight: 600 }}>{stats.enAttente}</span>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-              <span style={{ width: 9, height: 9, borderRadius: "50%", background: STATUS.echouee.color, display: "inline-block" }} />
-              Échouées <span style={{ marginLeft: "auto", fontWeight: 600 }}>{stats.echouees}</span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {evolution.length > 1 && (
-        <div style={{ margin: "14px 20px 0", background: "white", border: "1px solid #ECE8DC", borderRadius: 14, padding: "18px 20px 14px" }}>
-          <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>Évolution des commandes</div>
-          <EvolutionChart data={evolution} />
-        </div>
-      )}
-
-      {(meilleurProduit || meilleurLivreur) && (
-        <div style={{ margin: "14px 20px 0", display: "flex", flexDirection: "column", gap: 8 }}>
-          {meilleurProduit && (
-            <div style={{ background: "#EAF3DE", border: "1px solid #C7DDA3", borderRadius: 12, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: 12.5, color: "#3B6D11" }}>🏆 Produit le plus vendu</span>
-              <span style={{ fontSize: 12.5, fontWeight: 700, color: "#3B6D11" }}>{meilleurProduit.nom} ({meilleurProduit.ventes})</span>
-            </div>
-          )}
-          {produitPlusRentable && produitPlusRentable.nom !== meilleurProduit?.nom && (
-            <div style={{ background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 12, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: 12.5, color: "#8A6412" }}>💰 Produit le plus rentable</span>
-              <span style={{ fontSize: 12.5, fontWeight: 700, color: "#8A6412" }}>{produitPlusRentable.nom}</span>
-            </div>
-          )}
-          {meilleurLivreur && meilleurLivreur.total > 0 && (
-            <div style={{ background: "#EAF7F1", border: "1px solid #C7E8D6", borderRadius: 12, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: 12.5, color: "#1F9D6E" }}>🚀 Livreur le plus performant</span>
-              <span style={{ fontSize: 12.5, fontWeight: 700, color: "#1F9D6E" }}>{meilleurLivreur.nom} ({meilleurLivreur.taux}%)</span>
-            </div>
-          )}
-        </div>
-      )}
-
-      {produits.length > 0 && (
-        <div style={{ margin: "14px 20px 0", background: "white", border: "1px solid #ECE8DC", borderRadius: 14, padding: "18px 20px 14px" }}>
-          <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 12 }}>Produits (période sélectionnée)</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {produits.slice(0, 6).map((p, i) => {
-              const maxV = produits[0].ventes || 1;
-              return (
-                <div key={i}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 3 }}>
-                    <span>{p.nom}</span>
-                    <span style={{ fontWeight: 600 }}>{p.ventes} · {formatFCFA(p.revenus)}</span>
-                  </div>
-                  <div style={{ background: "#ECE8DC", borderRadius: 999, height: 6, overflow: "hidden" }}>
-                    <div style={{ width: `${(p.ventes / maxV) * 100}%`, background: "#e8920a", height: "100%", borderRadius: 999 }} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {produitsQuantiteDetail.length > 0 && (
-        <div style={{ margin: "14px 20px 0", background: "white", border: "1px solid #ECE8DC", borderRadius: 14, padding: "18px 20px" }}>
-          <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 12 }}>📦 Quantités par produit</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {produitsQuantiteDetail.map((p) => (
-              <div key={p.nom} style={{ background: "#FAFAF7", borderRadius: 8, padding: "8px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-                <span style={{ fontSize: 12.5, fontWeight: 500 }}>{p.nom}</span>
-                <div style={{ display: "flex", gap: 10, fontSize: 11.5 }}>
-                  <span style={{ color: "#8A9089" }}>{p.assignes} au total</span>
-                  <span style={{ color: "#1F9D6E" }}>{p.livres} livrés</span>
-                  <span style={{ color: p.restants > 0 ? "#D64933" : "#8A9089", fontWeight: 600 }}>{p.restants} restants</span>
-                </div>
+      {livreursAvecCommandes.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10 }}>📊 Résumé — commandes reçues par livreur ({periodLabel})</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {livreursAvecCommandes.map((l) => (
+              <div key={l.nom} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 8, padding: "9px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 13 }}><strong>{l.nom}</strong> a reçu</span>
+                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 14, color: "#1a7a3c" }}>{l.total} commande{l.total > 1 ? "s" : ""}</span>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 8, padding: "14px 20px 0" }}>
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Rechercher un client ou numéro..."
-          style={{ flex: 1, padding: "9px 12px", borderRadius: 9, border: "1px solid #DDD8CC", fontSize: 13.5, background: "white" }}
-        />
-        <button
-          onClick={() => exportCSV(filtered)}
-          aria-label="Exporter en CSV"
-          style={{ background: "white", border: "1px solid #DDD8CC", borderRadius: 9, padding: "0 13px", color: "#1a7a3c", fontWeight: 600, fontSize: 12.5, whiteSpace: "nowrap" }}
-        >
-          Exporter
-        </button>
-      </div>
-
-      <div style={{ display: "flex", gap: 8, padding: "16px 20px 8px", overflowX: "auto" }}>
-        {[
-          { key: "toutes", label: "Toutes" },
-          { key: "echouee", label: "Échouées" },
-          { key: "en_cours", label: "En cours" },
-          { key: "confirmee", label: "Confirmées" },
-        ].map((f) => (
-          <button
-            key={f.key}
-            onClick={() => setFilter(f.key)}
-            style={{
-              padding: "7px 14px",
-              borderRadius: 999,
-              border: "1px solid " + (filter === f.key ? "#1a7a3c" : "#DDD8CC"),
-              background: filter === f.key ? "#1a7a3c" : "white",
-              color: filter === f.key ? "white" : "#16231F",
-              fontSize: 13,
-              fontWeight: 500,
-              whiteSpace: "nowrap",
-            }}
-          >
-            {f.label}
-          </button>
+      <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10 }}>Détail par livreur</div>
+      {depotsParLivreur.length === 0 && <div style={{ color: "#8A9089", fontSize: 13 }}>Aucune livraison confirmée sur cette période.</div>}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {depotsParLivreur.map((l) => (
+          <LivreurDetailComptableSaas key={l.nom} l={l} produits={produitsParLivreur[l.nom] || []} currency={workspace.currency} />
         ))}
       </div>
-
-      {(livreurs.length > 0 || produits.length > 0) && (
-        <div style={{ display: "flex", gap: 8, padding: "0 20px 8px" }}>
-          {livreurs.length > 0 && (
-            <select
-              value={filterLivreur}
-              onChange={(e) => setFilterLivreur(e.target.value)}
-              style={{ flex: 1, padding: "7px 8px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 12.5, background: "white", color: filterLivreur === "tous" ? "#8A9089" : "#16231F" }}
-            >
-              <option value="tous">Tous les livreurs</option>
-              {livreurs.map((l) => (
-                <option key={l.id} value={l.nom}>{l.nom}</option>
-              ))}
-            </select>
-          )}
-          {produits.length > 0 && (
-            <select
-              value={filterProduit}
-              onChange={(e) => setFilterProduit(e.target.value)}
-              style={{ flex: 1, padding: "7px 8px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 12.5, background: "white", color: filterProduit === "tous" ? "#8A9089" : "#16231F" }}
-            >
-              <option value="tous">Tous les produits</option>
-              {produits.map((p) => (
-                <option key={p.nom} value={p.nom}>{p.nom}</option>
-              ))}
-            </select>
-          )}
-        </div>
-      )}
-
-      <div style={{ padding: "8px 20px", display: "flex", flexDirection: "column", gap: 6 }}>
-        {filtered.length === 0 && (
-          <div style={{ textAlign: "center", padding: "40px 0", color: "#8A9089", fontSize: 14 }}>
-            Aucune commande dans ce filtre.
-          </div>
-        )}
-        {groupedByDay.map((group, gi) => (
-          <div key={gi} style={{ marginBottom: 8 }}>
-            <div
-              style={{
-                fontSize: 12.5,
-                fontWeight: 700,
-                color: "#1a7a3c",
-                textTransform: "capitalize",
-                padding: "10px 2px 8px",
-                position: "sticky",
-                top: 0,
-                background: "#FAFAF7",
-                zIndex: 5,
-              }}
-            >
-              {group.label} <span style={{ color: "#8A9089", fontWeight: 500 }}>({group.orders.length})</span>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {group.orders.map((o) => {
-                const s = STATUS[o.statut];
-                return (
-                  <button
-                    key={o.id}
-                    onClick={() => setSelected(o)}
-                    style={{
-                      textAlign: "left",
-                      background: "white",
-                      border: "1px solid #ECE8DC",
-                      borderLeft: `4px solid ${s.color}`,
-                      borderRadius: 10,
-                      padding: "12px 14px",
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: 14.5 }}>{o.client}</div>
-                      <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{o.produit} · {o.zone}</div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
-                        <span style={{ fontSize: 11.5, color: s.color, fontWeight: 500 }}>{o.derniere_tentative}</span>
-                        {relanceCountByOrder.count[o.id] > 0 && (
-                          <span style={{ fontSize: 10.5, color: "#1a7a3c", background: "#EAF3DE", padding: "1px 7px", borderRadius: 999, fontWeight: 600 }}>
-                            {relanceCountByOrder.count[o.id]} relance{relanceCountByOrder.count[o.id] > 1 ? "s" : ""}
-                          </span>
-                        )}
-                        {o.type_livraison === "expedition" && (
-                          <span style={{ fontSize: 10.5, fontWeight: 600, color: o.depot_recu ? "#3B6D11" : "#B23A22", background: o.depot_recu ? "#EAF3DE" : "#FBEAE6", padding: "1px 7px", borderRadius: 999 }}>
-                            📦 {o.depot_recu ? "Dépôt reçu" : "En attente dépôt"}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <div style={{ textAlign: "right" }}>
-                      <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 15 }}>{formatFCFA(o.montant + (o.frais_expedition || 0))}</div>
-                      <div style={{ fontSize: 11, marginTop: 4, padding: "2px 8px", borderRadius: 999, background: s.bg, color: s.color, display: "inline-block", fontWeight: 500 }}>
-                        {s.label}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ))}
-      </div>
-      </>
-      )}
-
-      {view === "today" && (
-        <div className="rv-fadein">
-          <TodayView
-            todo={todoAujourdhui}
-            onSelectOrder={(o) => { setView("dashboard"); setSelected(o); }}
-            onRelancerTout={() => setShowBatch(true)}
-            clientsARelancer={clientsARelancer}
-            monProfilCloser={monProfilCloser}
-            commandesNonAssigneesListe={monProfilCloser ? orders.filter((o) => !o.closer && (o.statut === "en_cours" || o.statut === "echouee")) : []}
-            onSeAttribuer={seAttribuerCommande}
-            enAttenteDepot={orders.filter((o) => o.type_livraison === "expedition" && !o.depot_recu && (o.statut === "en_cours" || o.statut === "echouee"))}
-          />
-        </div>
-      )}
-
-      {view === "validations" && (
-        <div className="rv-fadein">
-          <ValidationsView
-            orders={orders}
-            onSelectOrder={(o) => { setView("dashboard"); setSelected(o); }}
-          />
-        </div>
-      )}
-
-      {view === "clients" && (
-        <div className="rv-fadein">
-          <ClientsView clients={clients} onSelect={setSelectedClient} />
-        </div>
-      )}
-
-      {view === "livreurs" && (
-        <div className="rv-fadein">
-          <LivreursView livreurs={livreursStats} onDelete={deleteLivreur} onToggleModeSimplifie={toggleModeSimplifieLivreur} readOnly={!!monProfilCloser} periodLabel={periodLabel} />
-        </div>
-      )}
-
-      {view === "closers" && (
-        <div className="rv-fadein">
-          <ClosersView closers={closersStats} onDelete={deleteCloser} nonAssignees={commandesNonAssignees} periodLabel={periodLabel} />
-        </div>
-      )}
-
-      </div>
-
-      <div
-        className="rv-bottomnav"
-        style={{
-          position: "fixed",
-          bottom: 0,
-          left: 0,
-          right: 0,
-          background: "white",
-          borderTop: "1px solid #ECE8DC",
-          display: "flex",
-          padding: "8px 12px",
-          paddingBottom: "calc(8px + env(safe-area-inset-bottom))",
-          zIndex: 20,
-        }}
-      >
-        {[
-          { key: "dashboard", label: "Commandes", icon: Package },
-          { key: "today", label: "Aujourd'hui", icon: ListChecks },
-          { key: "validations", label: "Validations", icon: CheckCheck },
-          { key: "clients", label: "Clients", icon: Users },
-          { key: "livreurs", label: "Livreurs", icon: Truck },
-          { key: "closers", label: "Closers", icon: Headset },
-        ].filter((t) => !monProfilCloser || t.key !== "closers").map((t) => {
-          const Icon = t.icon;
-          const active = view === t.key;
-          return (
-            <button
-              key={t.key}
-              onClick={() => setView(t.key)}
-              style={{
-                flex: 1,
-                background: "none",
-                border: "none",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: 3,
-                padding: "6px 0",
-                color: active ? "#1a7a3c" : "#8A9089",
-              }}
-            >
-              <Icon size={20} />
-              <span style={{ fontSize: 11, fontWeight: active ? 600 : 500 }}>{t.label}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      <button
-        className="rv-fab"
-        onClick={() => (view === "livreurs" ? setShowAddLivreur(true) : view === "closers" ? setShowAddCloser(true) : setShowAdd(true))}
-        style={{
-          position: "fixed",
-          bottom: 84,
-          right: 24,
-          width: 52,
-          height: 52,
-          borderRadius: "50%",
-          background: "#1a7a3c",
-          color: "white",
-          border: "none",
-          display: (view === "clients" || (view === "livreurs" && monProfilCloser)) ? "none" : "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          boxShadow: "0 6px 18px rgba(15,61,62,0.35)",
-        }}
-        aria-label="Ajouter"
-      >
-        <Plus size={24} />
-      </button>
-
-      {toast && (
-        <div style={{ position: "fixed", bottom: 150, left: "50%", transform: "translateX(-50%)", background: "#16231F", color: "white", padding: "9px 18px", borderRadius: 999, fontSize: 13, fontWeight: 500 }}>
-          {toast}
-        </div>
-      )}
-
-      {selected && (
-        <OrderDetail
-          order={selected}
-          onClose={() => setSelected(null)}
-          onStatus={updateStatus}
-          livreurs={livreurs}
-          onAssignLivreur={assignLivreur}
-          closers={monProfilCloser ? null : closers}
-          onAssignCloser={assignCloser}
-          onReschedule={rescheduleOrder}
-          onRelanceAdded={loadRelances}
-          onUpdateInfos={updateOrderInfos}
-          onMarquerDepot={marquerDepot}
-        />
-      )}
-      {showAdd && <AddOrder onClose={() => setShowAdd(false)} onAdd={addOrder} />}
-      {showAddLivreur && <AddLivreur onClose={() => setShowAddLivreur(false)} onAdd={addLivreur} />}
-      {showAddCloser && <AddCloser onClose={() => setShowAddCloser(false)} onAdd={addCloser} />}
-      {showInvite && <InviteModal onClose={() => setShowInvite(false)} />}
-      {showTeam && <TeamModal onClose={() => setShowTeam(false)} currentUserId={session.user.id} />}
-      {celebration && <CelebrationOverlay montant={celebration.montant} client={celebration.client} />}
-      {showBatch && (
-        <BatchRelanceModal
-          orders={[...todoAujourdhui.aRelivrer, ...todoAujourdhui.jamaisContactees, ...todoAujourdhui.sansNouvelles]}
-          onClose={() => setShowBatch(false)}
-          onLog={logRelance}
-        />
-      )}
-      {showCampagne && <CampagneModal clients={clients} onClose={() => setShowCampagne(false)} />}
-      {showComptables && <ComptablesModal comptables={comptables} onDelete={deleteComptable} onAddClick={() => setShowAddComptable(true)} onClose={() => setShowComptables(false)} />}
-      {showAddComptable && <AddComptable onClose={() => setShowAddComptable(false)} onAdd={addComptable} />}
-      {showComptaDetail && (
-        <ComptaDetailModal
-          stats={stats}
-          livreursStats={livreursStats}
-          coutLivraison={COUT_LIVRAISON}
-          periodLabel={periodLabel}
-          orders={orders}
-          livreurs={livreurs}
-          repartitionCloserLivreur={repartitionCloserLivreur}
-          onClose={() => setShowComptaDetail(false)}
-        />
-      )}
-      {showProduits && (
-        <ProduitsModal
-          produits={catalogueProduits}
-          onDelete={deleteProduit}
-          onUpdateCout={updateProduitCout}
-          onUpdateStock={updateProduitStock}
-          quantitesParProduit={quantitesParProduit}
-          onAddClick={() => setShowAddProduit(true)}
-          onClose={() => setShowProduits(false)}
-        />
-      )}
-      {showAddProduit && <AddProduit onClose={() => setShowAddProduit(false)} onAdd={addProduit} />}
-      {selectedClient && <ClientDetail client={selectedClient} onClose={() => setSelectedClient(null)} onSelectOrder={(o) => { setSelectedClient(null); setView("dashboard"); setSelected(o); }} />}
     </div>
   );
 }
 
-function EvolutionChart({ data }) {
+function LivreurDetailComptableSaas({ l, produits, currency }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 10, padding: "12px 14px" }}>
+      <div onClick={() => setOpen(!open)} style={{ cursor: "pointer" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ fontWeight: 600, fontSize: 14 }}>{l.nom}</div>
+          <span style={{ fontSize: 11, color: "#1a7a3c", fontWeight: 600 }}>{open ? "Fermer ▲" : "Voir le détail ▼"}</span>
+        </div>
+        <div style={{ fontSize: 11.5, color: "#6B7168", marginTop: 2 }}>{l.livrees} livraison{l.livrees > 1 ? "s" : ""} · {l.montantRecupere.toLocaleString("fr-FR")} {currency} encaissé</div>
+      </div>
+      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+        <div style={{ flex: 1, background: "#FBF3E3", borderRadius: 7, padding: "6px 9px", fontSize: 11, color: "#8A6412" }}>
+          Commission : <strong>{l.commission.toLocaleString("fr-FR")}</strong>
+        </div>
+        <div style={{ flex: 1, background: "#EAF3DE", borderRadius: 7, padding: "6px 9px", fontSize: 11, color: "#3B6D11" }}>
+          À déposer : <strong>{l.aDeposer.toLocaleString("fr-FR")}</strong>
+        </div>
+      </div>
+
+      {open && (
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #F0EEE6" }}>
+          <div style={{ fontSize: 10.5, color: "#8A9089", textTransform: "uppercase", marginBottom: 6 }}>CA par produit</div>
+          {produits.length === 0 && <div style={{ fontSize: 12, color: "#8A9089" }}>Aucune vente confirmée.</div>}
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            {produits.map((p) => (
+              <div key={p.nom} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                <span style={{ color: "#6B7168" }}>{p.nom} <span style={{ color: "#8A9089" }}>({p.pieces} pc)</span></span>
+                <span style={{ fontWeight: 600 }}>{p.ca.toLocaleString("fr-FR")} {currency}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CloserPortalSaas({ closer, commandes, currency, workspace, onStatusChanged }) {
+  const [datePreset, setDatePreset] = useState("toutes");
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
+
+  const dateRange = useMemo(() => {
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    let start, end;
+    if (datePreset === "aujourdhui") {
+      start = startOfToday;
+      end = new Date(startOfToday.getTime() + 86400000);
+    } else if (datePreset === "hier") {
+      start = new Date(startOfToday.getTime() - 86400000);
+      end = startOfToday;
+    } else if (datePreset === "avanthier") {
+      start = new Date(startOfToday.getTime() - 2 * 86400000);
+      end = new Date(startOfToday.getTime() - 86400000);
+    } else if (datePreset === "semaine") {
+      const day = startOfToday.getDay();
+      const diff = day === 0 ? 6 : day - 1;
+      start = new Date(startOfToday.getTime() - diff * 86400000);
+      end = new Date(now.getTime() + 60000);
+    } else if (datePreset === "personnalise" && customStart && customEnd) {
+      start = new Date(customStart + "T00:00:00");
+      end = new Date(customEnd + "T23:59:59");
+    } else {
+      start = new Date(0);
+      end = new Date(now.getTime() + 60000);
+    }
+    return { start, end };
+  }, [datePreset, customStart, customEnd]);
+
+  const mesCommandesToutes = commandes.filter((c) => c.closer === closer.nom);
+  const actives = mesCommandesToutes.filter((c) => {
+    if (c.statut !== "en_cours" && c.statut !== "echouee") return false;
+    const d = new Date(c.created_at);
+    return d >= dateRange.start && d < dateRange.end;
+  });
+  const confirmees = mesCommandesToutes.filter((c) => c.statut === "confirmee");
+  const nonAssignees = commandes.filter((c) => !c.closer && (c.statut === "en_cours" || c.statut === "echouee"));
+  const [selected, setSelected] = useState(null);
+
+  async function changerStatut(commandeId, nouveauStatut) {
+    const ancien = commandes.find((c) => c.id === commandeId)?.statut;
+    const infosValidation = nouveauStatut === "confirmee" ? { confirmed_at: new Date().toISOString(), confirmed_by: closer.nom } : {};
+    await supabase.from("commandes").update({ statut: nouveauStatut, ...infosValidation }).eq("id", commandeId);
+    await supabase.from("relances").insert([
+      { commande_id: commandeId, note: `📋 Statut : ${ancien} → ${nouveauStatut}${nouveauStatut === "confirmee" ? ` par ${closer.nom}` : ""}` },
+    ]);
+    if (nouveauStatut === "confirmee") {
+      supabase.auth.getSession().then(({ data: sessionData }) => {
+        fetch("/api/facebook-capi", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionData.session?.access_token}` },
+          body: JSON.stringify({ commandeId }),
+        }).catch(() => {});
+      });
+    }
+    await onStatusChanged();
+    setSelected(null);
+  }
+
+  async function seAttribuer(commandeId) {
+    const { data, error } = await supabase
+      .from("commandes")
+      .update({ closer: closer.nom })
+      .eq("id", commandeId)
+      .is("closer", null)
+      .select();
+
+    if (error) {
+      alert("Erreur: " + error.message);
+      return;
+    }
+    if (!data || data.length === 0) {
+      alert("⚠️ Trop tard, un autre closer vient de la prendre");
+      await onStatusChanged();
+      return;
+    }
+    await supabase.from("relances").insert([{ commande_id: commandeId, note: `🎧 Prise en charge par ${closer.nom}` }]);
+    await onStatusChanged();
+  }
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#FAFAF7", fontFamily: "'IBM Plex Sans', sans-serif" }}>
+      <div style={{ background: "#1a7a3c", color: "white", padding: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ fontWeight: 700, fontSize: 18 }}>RecuVente — {workspace.name}</div>
+          <button onClick={() => supabase.auth.signOut()} style={{ background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: "6px 12px", borderRadius: 7, fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
+            Déconnexion
+          </button>
+        </div>
+        <div style={{ fontSize: 13, opacity: 0.8, marginTop: 8 }}>Bonjour</div>
+        <div style={{ fontWeight: 700, fontSize: 22 }}>{closer.nom}</div>
+
+        <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+          <div style={{ flex: 1, background: "rgba(255,255,255,0.1)", borderRadius: 10, padding: "10px 12px" }}>
+            <div style={{ fontSize: 11, opacity: 0.75 }}>À traiter</div>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 20 }}>{actives.length}</div>
+          </div>
+          <div style={{ flex: 1, background: "rgba(255,255,255,0.1)", borderRadius: 10, padding: "10px 12px" }}>
+            <div style={{ fontSize: 11, opacity: 0.75 }}>Confirmées</div>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 20 }}>{confirmees.length}</div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ padding: "18px 20px" }}>
+        {nonAssignees.length > 0 && (
+          <div style={{ background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 14, padding: "14px 16px", marginBottom: 18 }}>
+            <div style={{ fontWeight: 700, fontSize: 14.5, color: "#8A6412", marginBottom: 2 }}>
+              🆓 Non assignées — à prendre ({nonAssignees.length})
+            </div>
+            <div style={{ fontSize: 12, color: "#8A6412", marginBottom: 10 }}>
+              Personne n'a encore pris ces commandes. Une fois prise, elle disparaît pour les autres closers.
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {nonAssignees.slice(0, 8).map((o) => (
+                <div key={o.id} style={{ background: "white", borderRadius: 10, padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.client}</div>
+                    <div style={{ fontSize: 11.5, color: "#6B7168" }}>{o.produit} · {Number(o.montant).toLocaleString("fr-FR")} {currency}</div>
+                  </div>
+                  <button
+                    onClick={() => seAttribuer(o.id)}
+                    style={{ flexShrink: 0, background: "#e8920a", color: "white", border: "none", borderRadius: 8, padding: "8px 12px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}
+                  >
+                    Je la prends
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 6, marginBottom: 14, overflowX: "auto" }}>
+          {[
+            { key: "toutes", label: "Toutes" },
+            { key: "aujourdhui", label: "Aujourd'hui" },
+            { key: "hier", label: "Hier" },
+            { key: "avanthier", label: "Avant-hier" },
+            { key: "semaine", label: "Cette semaine" },
+            { key: "personnalise", label: "Personnalisé" },
+          ].map((d) => (
+            <button
+              key={d.key}
+              onClick={() => setDatePreset(d.key)}
+              style={{ padding: "6px 13px", borderRadius: 999, border: `1px solid ${datePreset === d.key ? "#1a7a3c" : "#DDD8CC"}`, background: datePreset === d.key ? "#1a7a3c" : "white", color: datePreset === d.key ? "white" : "#16231F", fontSize: 12.5, fontWeight: 500, whiteSpace: "nowrap", flexShrink: 0, cursor: "pointer" }}
+            >
+              {d.label}
+            </button>
+          ))}
+        </div>
+
+        {datePreset === "personnalise" && (
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 14 }}>
+            <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 13 }} />
+            <span style={{ color: "#8A9089", fontSize: 12 }}>à</span>
+            <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 13 }} />
+          </div>
+        )}
+
+        <div style={{ fontSize: 12.5, color: "#8A9089", marginBottom: 10 }}>
+          {actives.length} commande{actives.length > 1 ? "s" : ""} à traiter{datePreset !== "toutes" ? " sur cette période" : ""}
+        </div>
+
+        {actives.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "50px 20px", color: "#8A9089" }}>
+            <div style={{ fontSize: 40, marginBottom: 10 }}>🎉</div>
+            <div style={{ fontSize: 14 }}>Aucune commande à traiter pour le moment.</div>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {actives.map((c) => (
+              <div key={c.id} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "14px 16px" }}>
+                <div onClick={() => setSelected(selected === c.id ? null : c.id)} style={{ cursor: "pointer", display: "flex", justifyContent: "space-between" }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 15 }}>{c.client}</div>
+                    <div style={{ fontSize: 13, color: "#6B7168", marginTop: 3 }}>{c.produit} · {c.tel}</div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 16, color: "#1a7a3c" }}>{Number(c.montant).toLocaleString("fr-FR")} {currency}</div>
+                    <div style={{ fontSize: 10, color: "#8A9089", marginTop: 3 }}>Appeler, historique... {selected === c.id ? "▲" : "▼"}</div>
+                  </div>
+                </div>
+
+                {selected !== c.id && (
+                  <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+                    <button onClick={() => changerStatut(c.id, "confirmee")} style={{ flex: 1, background: "#1F9D6E", color: "white", border: "none", borderRadius: 7, padding: "8px 0", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                      ✅ Confirmer
+                    </button>
+                    <button onClick={() => changerStatut(c.id, "echouee")} style={{ flex: 1, background: "#D64933", color: "white", border: "none", borderRadius: 7, padding: "8px 0", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                      ❌ Échoué
+                    </button>
+                  </div>
+                )}
+
+                {selected === c.id && (
+                  <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #F0EEE6" }}>
+                    <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                      <a href={`tel:${c.tel}`} style={{ flex: 1, textAlign: "center", background: "white", border: "1px solid #DDD8CC", color: "#16231F", padding: "9px 0", borderRadius: 8, fontWeight: 600, fontSize: 12.5, textDecoration: "none" }}>
+                        📞 Appeler
+                      </a>
+                      <a
+                        href={`https://wa.me/${cleanPhoneForWhatsApp(c.tel)}?text=${encodeURIComponent(`Bonjour ${(c.client || "").split(" ")[0]} 👋, nous confirmons votre commande "${c.produit}" (${Number(c.montant).toLocaleString("fr-FR")} ${currency}). Un livreur passera bientôt.`)}`}
+                        target="_blank" rel="noopener noreferrer"
+                        style={{ flex: 1, textAlign: "center", background: "#1F9D6E", color: "white", padding: "9px 0", borderRadius: 8, fontWeight: 600, fontSize: 12.5, textDecoration: "none" }}
+                      >
+                        💬 WhatsApp
+                      </a>
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button onClick={() => changerStatut(c.id, "confirmee")} style={{ flex: 1, background: "#1F9D6E", color: "white", border: "none", padding: "10px 0", borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+                        ✅ Confirmer
+                      </button>
+                      <button onClick={() => changerStatut(c.id, "echouee")} style={{ flex: 1, background: "#D64933", color: "white", border: "none", padding: "10px 0", borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+                        ❌ Échoué
+                      </button>
+                    </div>
+                    <HistoriqueRelances commandeId={c.id} />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function StatusDonutSaas({ livrees, enAttente, echouees }) {
+  const total = livrees + enAttente + echouees || 1;
+  const r = 34;
+  const circ = 2 * Math.PI * r;
+  const segs = [
+    { val: livrees, color: "#1F9D6E" },
+    { val: enAttente, color: "#E8A93D" },
+    { val: echouees, color: "#D64933" },
+  ];
+  let offset = 0;
+  return (
+    <svg width="92" height="92" viewBox="0 0 92 92" style={{ flexShrink: 0 }}>
+      <circle cx="46" cy="46" r={r} fill="none" stroke="#ECE8DC" strokeWidth="12" />
+      {segs.map((s, i) => {
+        const frac = s.val / total;
+        const len = frac * circ;
+        const el = (
+          <circle key={i} cx="46" cy="46" r={r} fill="none" stroke={s.color} strokeWidth="12" strokeDasharray={`${len} ${circ - len}`} strokeDashoffset={-offset} transform="rotate(-90 46 46)" />
+        );
+        offset += len;
+        return el;
+      })}
+      <text x="46" y="50" textAnchor="middle" fontFamily="monospace" fontWeight="600" fontSize="18" fill="#16231F">
+        {livrees + enAttente + echouees}
+      </text>
+    </svg>
+  );
+}
+
+function EvolutionChartSaas({ data }) {
   const w = 300;
   const h = 110;
-  const padL = 4;
-  const padR = 4;
-  const padT = 8;
-  const padB = 20;
+  const padL = 4, padR = 4, padT = 8, padB = 20;
   const maxVal = Math.max(...data.map((d) => d.commandes), 1);
   const innerW = w - padL - padR;
   const innerH = h - padT - padB;
@@ -2313,13 +5573,11 @@ function EvolutionChart({ data }) {
     <svg width="100%" height={h + 10} viewBox={`0 0 ${w} ${h + 10}`} preserveAspectRatio="none" style={{ overflow: "visible" }}>
       <path d={areaD} fill="#EAF3DE" />
       <path d={pathD} fill="none" stroke="#1a7a3c" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-      {points.map((p, i) => (
-        <circle key={i} cx={p.x} cy={p.y} r="2.5" fill="#1a7a3c" />
-      ))}
+      {points.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r="2.5" fill="#1a7a3c" />)}
       {points.map((p, i) => {
         if (data.length > 8 && i % Math.ceil(data.length / 6) !== 0 && i !== data.length - 1) return null;
         return (
-          <text key={"t" + i} x={p.x} y={h + 8} fontSize="8" fill="#8A9089" textAnchor="middle" fontFamily="'IBM Plex Sans', sans-serif">
+          <text key={"t" + i} x={p.x} y={h + 8} fontSize="8" fill="#8A9089" textAnchor="middle">
             {p.d.label}
           </text>
         );
@@ -2328,1128 +5586,154 @@ function EvolutionChart({ data }) {
   );
 }
 
-function StatusDonut({ livrees, enAttente, echouees }) {
-  const total = livrees + enAttente + echouees || 1;
-  const r = 34;
-  const circ = 2 * Math.PI * r;
-  const segs = [
-    { val: livrees, color: STATUS.confirmee.color },
-    { val: enAttente, color: STATUS.en_cours.color },
-    { val: echouees, color: STATUS.echouee.color },
-  ];
-  let offset = 0;
-  return (
-    <svg width="92" height="92" viewBox="0 0 92 92" style={{ flexShrink: 0 }}>
-      <circle cx="46" cy="46" r={r} fill="none" stroke="#ECE8DC" strokeWidth="12" />
-      {segs.map((s, i) => {
-        const frac = s.val / total;
-        const len = frac * circ;
-        const el = (
-          <circle
-            key={i}
-            cx="46"
-            cy="46"
-            r={r}
-            fill="none"
-            stroke={s.color}
-            strokeWidth="12"
-            strokeDasharray={`${len} ${circ - len}`}
-            strokeDashoffset={-offset}
-            transform="rotate(-90 46 46)"
-          />
-        );
-        offset += len;
-        return el;
-      })}
-      <text x="46" y="50" textAnchor="middle" fontFamily="'IBM Plex Mono', monospace" fontWeight="600" fontSize="18" fill="#16231F">
-        {livrees + enAttente + echouees}
-      </text>
-    </svg>
-  );
-}
+function CampagneModalSaas({ clients, workspace, onClose }) {
+  const [segment, setSegment] = useState("tous");
+  const [segmentProduit, setSegmentProduit] = useState("");
+  const [message, setMessage] = useState("");
+  const [productLink, setProductLink] = useState("");
+  const [started, setStarted] = useState(false);
+  const [index, setIndex] = useState(0);
+  const [sentCount, setSentCount] = useState(0);
 
-function JournalAppelsPrincipal({ orderId }) {
-  const [appels, setAppels] = useState(null);
+  const produitsAchetes = useMemo(() => {
+    const set = new Set();
+    clients.forEach((c) => c.commandes.forEach((o) => set.add((o.produit || "").split(" x")[0].trim())));
+    return Array.from(set).filter(Boolean);
+  }, [clients]);
 
-  useEffect(() => {
-    supabase.from("appels_commande").select("*").eq("commande_id", orderId).order("created_at", { ascending: false }).then(({ data }) => setAppels(data || []));
-  }, [orderId]);
+  const clientsSegmentes = useMemo(() => {
+    const now = new Date();
+    if (segment === "inactifs30") {
+      return clients.filter((c) => {
+        const dernier = c.commandes.reduce((max, o) => (new Date(o.created_at) > max ? new Date(o.created_at) : max), new Date(0));
+        return (now - dernier) / (1000 * 3600 * 24) >= 30;
+      });
+    }
+    if (segment === "produit" && segmentProduit) {
+      return clients.filter((c) => c.commandes.some((o) => (o.produit || "").split(" x")[0].trim() === segmentProduit));
+    }
+    if (segment === "vip") {
+      return clients.filter((c) => c.total >= 3);
+    }
+    return clients;
+  }, [clients, segment, segmentProduit]);
 
-  if (!appels || appels.length === 0) return null;
+  const current = clientsSegmentes[index];
 
-  const labels = {
-    confirme_telephone: { texte: "✅ Confirmé par téléphone", couleur: "#1F9D6E" },
-    pas_de_reponse: { texte: "📵 Pas de réponse", couleur: "#8A6412" },
-    rappeler_plus_tard: { texte: "🕒 Rappeler plus tard", couleur: "#8A6412" },
-    faux_numero: { texte: "🚫 Faux numéro", couleur: "#D64933" },
-    refuse: { texte: "❌ Refusé", couleur: "#D64933" },
-  };
-
-  return (
-    <div style={{ marginBottom: 14 }}>
-      <div style={{ fontSize: 10.5, color: "#8A9089", textTransform: "uppercase", marginBottom: 6 }}>📞 Historique des appels</div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-        {appels.map((a) => (
-          <div key={a.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, background: "#FAFAF7", borderRadius: 7, padding: "6px 10px" }}>
-            <span style={{ color: labels[a.motif]?.couleur || "#16231F", fontWeight: 600 }}>{labels[a.motif]?.texte || a.motif}</span>
-            <span style={{ color: "#8A9089" }}>{new Date(a.created_at).toLocaleString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, closers, onAssignCloser, onReschedule, onRelanceAdded, onUpdateInfos, onMarquerDepot }) {
-  const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState({ client: order.client, tel: order.tel, zone: order.zone, produit: order.produit, montant: order.montant, type_livraison: order.type_livraison || "abidjan", frais_expedition: order.frais_expedition, montant_depot: order.montant_depot, depot_recu: order.depot_recu });
-  const [saving, setSaving] = useState(false);
-  const [showAppel, setShowAppel] = useState(false);
-
-  async function enregistrer() {
-    setSaving(true);
-    await onUpdateInfos(order.id, {
-      client: form.client,
-      tel: form.tel,
-      zone: form.zone,
-      produit: form.produit,
-      montant: Number(form.montant),
-      type_livraison: form.type_livraison || "abidjan",
-      frais_expedition: Number(form.frais_expedition) || 0,
-      montant_depot: Number(form.montant_depot) || 0,
-      depot_recu: !!form.depot_recu,
-    });
-    setSaving(false);
-    setEditing(false);
+  function personalize(tpl, nom) {
+    let text = tpl.replace(/\{prenom\}/gi, (nom || "").split(" ")[0] || "");
+    if (productLink.trim()) text = text.trim() + "\n\n" + productLink.trim();
+    return text;
   }
 
+  function send() {
+    const text = personalize(message, current.nom);
+    window.open(`https://wa.me/${cleanPhoneForWhatsApp(current.tel)}?text=${encodeURIComponent(text)}`, "_blank");
+    setSentCount((c) => c + 1);
+  }
+
+  function next() {
+    setIndex((i) => i + 1);
+  }
+
+  const finished = started && index >= clientsSegmentes.length;
+
   return (
-    <div className="rv-modal-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", zIndex: 50 }} onClick={onClose}>
-      <div className="rv-modal-sheet" onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", maxHeight: "88vh", overflowY: "auto", borderRadius: "18px 18px 0 0", padding: "18px 20px 28px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-          <button onClick={onClose} style={{ background: "none", border: "none", padding: 4 }}>
-            <ChevronLeft size={22} />
-          </button>
-          {!editing ? (
-            <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 19, flex: 1 }}>{order.client}</div>
-          ) : (
-            <div style={{ flex: 1, fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 19 }}>Modifier la commande</div>
-          )}
-          <button
-            onClick={() => (editing ? enregistrer() : setEditing(true))}
-            disabled={saving}
-            style={{ background: editing ? "#1a7a3c" : "none", color: editing ? "white" : "#1a7a3c", border: editing ? "none" : "1px solid #1a7a3c", borderRadius: 8, padding: "6px 12px", fontSize: 12.5, fontWeight: 600 }}
-          >
-            {saving ? "..." : editing ? "Enregistrer" : "✏️ Modifier"}
-          </button>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 20 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", maxWidth: 400, maxHeight: "85vh", overflowY: "auto", borderRadius: 18, padding: "20px 20px 24px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 18 }}>Campagne promo</div>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer" }}>×</button>
         </div>
 
-        {!editing ? (
-          <div style={{ display: "flex", gap: 8, fontSize: 13, color: "#6B7168", marginBottom: 14 }}>
-            <span>{order.tel}</span>·<span>{order.zone}</span>
-          </div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
-            <div>
-              <label style={{ fontSize: 11, color: "#8A9089", display: "block", marginBottom: 3 }}>Zone de livraison</label>
-              <div style={{ display: "flex", gap: 6 }}>
+        {!started && (
+          <>
+            <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 6 }}>À qui envoyer ?</label>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 14 }}>
+              {[
+                { key: "tous", label: `Tous les clients (${clients.length})` },
+                { key: "vip", label: "Meilleurs clients — 3+ achats" },
+                { key: "inactifs30", label: "Inactifs depuis 30+ jours" },
+                { key: "produit", label: "Ayant acheté un produit précis" },
+              ].map((s) => (
                 <button
-                  onClick={() => setForm({ ...form, type_livraison: "abidjan" })}
-                  style={{ flex: 1, padding: "8px 6px", borderRadius: 8, border: `2px solid ${(form.type_livraison || "abidjan") !== "expedition" ? "#1a7a3c" : "#DDD8CC"}`, background: (form.type_livraison || "abidjan") !== "expedition" ? "#EAF3DE" : "white", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
-                >
-                  🏍️ Abidjan
-                </button>
-                <button
-                  onClick={() => setForm({ ...form, type_livraison: "expedition" })}
-                  style={{ flex: 1, padding: "8px 6px", borderRadius: 8, border: `2px solid ${form.type_livraison === "expedition" ? "#e8920a" : "#DDD8CC"}`, background: form.type_livraison === "expedition" ? "#FBF3E3" : "white", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
-                >
-                  📦 Hors Abidjan
-                </button>
-              </div>
-            </div>
-            {["client", "tel", "produit", "montant", "zone"].map((f) => (
-              <div key={f}>
-                <label style={{ fontSize: 11, color: "#8A9089", display: "block", marginBottom: 3, textTransform: "capitalize" }}>
-                  {f === "tel" ? "Téléphone" : f === "montant" ? "Montant (FCFA)" : f}
-                </label>
-                <input
-                  value={form[f]}
-                  onChange={(e) => setForm({ ...form, [f]: e.target.value })}
-                  type={f === "montant" ? "number" : "text"}
-                  style={{ width: "100%", padding: "9px 11px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 13.5, background: "white" }}
-                />
-              </div>
-            ))}
-            {form.type_livraison === "expedition" && (
-              <>
-                <div>
-                  <label style={{ fontSize: 11, color: "#8A9089", display: "block", marginBottom: 3 }}>Frais d'expédition (FCFA)</label>
-                  <input
-                    value={form.frais_expedition ?? order.frais_expedition ?? ""}
-                    onChange={(e) => setForm({ ...form, frais_expedition: e.target.value })}
-                    type="number"
-                    style={{ width: "100%", padding: "9px 11px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 13.5, background: "white" }}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: 11, color: "#8A9089", display: "block", marginBottom: 3 }}>Montant du dépôt reçu (FCFA)</label>
-                  <input
-                    value={form.montant_depot ?? order.montant_depot ?? ""}
-                    onChange={(e) => setForm({ ...form, montant_depot: e.target.value, depot_recu: Number(e.target.value) > 0 })}
-                    type="number"
-                    style={{ width: "100%", padding: "9px 11px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 13.5, background: "white" }}
-                  />
-                </div>
-              </>
-            )}
-          </div>
-        )}
-
-        {!editing && (
-        <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: 14, marginBottom: 14 }}>
-          <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.04em" }}>Commande</div>
-          <div style={{ fontWeight: 600, marginTop: 2 }}>{order.produit}</div>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 20, marginTop: 6, color: "#1a7a3c" }}>{formatFCFA(order.montant)}</div>
-        </div>
-        )}
-
-        {!editing && order.type_livraison !== "expedition" && order.statut !== "confirmee" && (
-          <button
-            onClick={() => {
-              const ville = prompt("Vers quelle ville faut-il expédier ce colis ?", order.zone || "");
-              if (ville === null) return;
-              onUpdateInfos(order.id, { type_livraison: "expedition", zone: ville.trim() || order.zone });
-            }}
-            style={{ width: "100%", background: "white", border: "1px solid #2452E8", color: "#2452E8", borderRadius: 10, padding: "10px 0", fontWeight: 700, fontSize: 13, cursor: "pointer", marginBottom: 14 }}
-          >
-            📦 Marquer à expédier (hors Abidjan)
-          </button>
-        )}
-
-        {!editing && order.type_livraison === "expedition" && (
-          <div style={{ background: order.depot_recu ? "#EAF3DE" : "#FBEAE6", border: `1px solid ${order.depot_recu ? "#C7DDA3" : "#F0B8AC"}`, borderRadius: 12, padding: 14, marginBottom: 14 }}>
-            <div style={{ fontWeight: 700, fontSize: 13, color: order.depot_recu ? "#3B6D11" : "#B23A22", marginBottom: 8 }}>
-              📦 Expédition hors Abidjan
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 4 }}>
-              <span style={{ color: "#6B7168" }}>Frais d'expédition</span>
-              <span style={{ fontWeight: 600 }}>{formatFCFA(order.frais_expedition || 0)}</span>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 8 }}>
-              <span style={{ color: "#6B7168" }}>Total à collecter</span>
-              <span style={{ fontWeight: 700 }}>{formatFCFA(order.montant + (order.frais_expedition || 0))}</span>
-            </div>
-            <div style={{ height: 1, background: "rgba(0,0,0,0.08)", margin: "8px 0" }} />
-            {order.depot_recu ? (
-              <div style={{ fontSize: 12.5, color: "#3B6D11", fontWeight: 600 }}>
-                ✅ Dépôt reçu : {formatFCFA(order.montant_depot || 0)}
-                {order.depot_recu_le && <div style={{ fontWeight: 400, fontSize: 11, marginTop: 2 }}>le {new Date(order.depot_recu_le).toLocaleDateString("fr-FR", { day: "numeric", month: "long" })}</div>}
-              </div>
-            ) : (
-              <button
-                onClick={() => {
-                  const montant = prompt("Montant du dépôt reçu (FCFA) :");
-                  if (montant && Number(montant) > 0) onMarquerDepot(order.id, Number(montant));
-                }}
-                style={{ width: "100%", background: "#1a7a3c", color: "white", border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, fontSize: 13, cursor: "pointer" }}
-              >
-                💰 Marquer le dépôt comme reçu
-              </button>
-            )}
-
-            {order.expedition_confirmee && order.photo_recu_expedition && (
-              <div style={{ marginTop: 12 }}>
-                <img
-                  src={order.photo_recu_expedition}
-                  alt="Reçu d'expédition"
-                  style={{ width: "100%", borderRadius: 8, marginBottom: 8, border: "1px solid #ECE8DC" }}
-                />
-                <a
-                  href={`https://wa.me/${cleanPhoneForWhatsApp(order.tel)}?text=${encodeURIComponent(`Bonjour ${order.client.split(" ")[0]} 👋, voici votre reçu d'expédition pour retirer votre colis à ${order.zone || "destination"} :\n\n${order.photo_recu_expedition}`)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ display: "block", textAlign: "center", width: "100%", background: "#1F9D6E", color: "white", padding: "10px 0", borderRadius: 8, fontWeight: 700, fontSize: 12.5, textDecoration: "none", boxSizing: "border-box" }}
-                >
-                  💬 Envoyer le reçu au client (WhatsApp)
-                </a>
-              </div>
-            )}
-
-            {order.depot_recu && !order.expedition_confirmee && (
-              <div style={{ marginTop: 10, background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 8, padding: "8px 10px", fontSize: 11.5, color: "#8A6412" }}>
-                ⏳ En attente que le livreur confirme l'expédition avec une photo du reçu.
-              </div>
-            )}
-          </div>
-        )}
-
-        {livreurs && livreurs.length > 0 && (
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 6 }}>Livreur assigné</div>
-            <select
-              value={order.livreur || ""}
-              onChange={(e) => onAssignLivreur(order.id, e.target.value)}
-              style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, background: "white" }}
-            >
-              <option value="">Non assigné</option>
-              {livreurs.map((l) => (
-                <option key={l.id} value={l.nom}>{l.nom}</option>
-              ))}
-            </select>
-          </div>
-        )}
-
-        {closers && closers.length > 0 && (
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 6 }}>Closer assigné</div>
-            <select
-              value={order.closer || ""}
-              onChange={(e) => onAssignCloser(order.id, e.target.value)}
-              style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, background: "white" }}
-            >
-              <option value="">Non assigné</option>
-              {closers.map((c) => (
-                <option key={c.id} value={c.nom}>{c.nom}</option>
-              ))}
-            </select>
-          </div>
-        )}
-
-        <div style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 6 }}>Statut</div>
-          <div style={{ display: "flex", gap: 8 }}>
-            {Object.entries(STATUS).map(([key, val]) => {
-              const bloqueDepot = key === "confirmee" && order.type_livraison === "expedition" && !order.depot_recu;
-              return (
-                <button
-                  key={key}
-                  onClick={() => !bloqueDepot && onStatus(order.id, key)}
-                  disabled={bloqueDepot}
-                  title={bloqueDepot ? "Le dépôt doit être reçu avant de confirmer" : undefined}
+                  key={s.key}
+                  onClick={() => setSegment(s.key)}
                   style={{
-                    flex: 1,
-                    padding: "8px 6px",
-                    borderRadius: 8,
-                    border: `1px solid ${order.statut === key ? val.color : "#DDD8CC"}`,
-                    background: bloqueDepot ? "#F0EEE6" : order.statut === key ? val.bg : "white",
-                    color: bloqueDepot ? "#B0AB9E" : order.statut === key ? val.color : "#6B7168",
-                    fontSize: 12.5,
-                    fontWeight: 600,
-                    cursor: bloqueDepot ? "not-allowed" : "pointer",
+                    textAlign: "left", padding: "9px 12px", borderRadius: 9,
+                    border: "1px solid " + (segment === s.key ? "#1a7a3c" : "#DDD8CC"),
+                    background: segment === s.key ? "#EAF3DE" : "white",
+                    color: segment === s.key ? "#1a7a3c" : "#16231F",
+                    fontSize: 13, fontWeight: segment === s.key ? 600 : 500, cursor: "pointer",
                   }}
                 >
-                  {bloqueDepot ? "🔒 " + val.label : val.label}
+                  {s.label}
                 </button>
-              );
-            })}
-          </div>
-          {order.type_livraison === "expedition" && !order.depot_recu && (
-            <div style={{ fontSize: 11, color: "#B23A22", marginTop: 5 }}>Reçois d'abord le dépôt avant de pouvoir confirmer cette expédition.</div>
-          )}
-        </div>
-
-        <div style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 6 }}>Reprogrammer la livraison</div>
-          <input
-            type="date"
-            value={order.date_relivraison || ""}
-            onChange={(e) => onReschedule(order.id, e.target.value)}
-            style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 13.5, background: "white" }}
-          />
-          {order.date_relivraison && (
-            <div style={{ fontSize: 12, color: "#1a7a3c", marginTop: 5, fontWeight: 600 }}>
-              📅 Prévue le {new Date(order.date_relivraison + "T00:00:00").toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}
+              ))}
             </div>
-          )}
-        </div>
 
-        <button
-          onClick={() => setShowAppel(true)}
-          style={{ width: "100%", background: "#EAF0FB", border: "1px solid #C3D4F0", color: "#1E4B8C", padding: "10px 0", borderRadius: 9, fontWeight: 700, fontSize: 13, cursor: "pointer", marginBottom: 14 }}
-        >
-          📞 Enregistrer un appel
-        </button>
-
-        <JournalAppelsPrincipal orderId={order.id} />
-        <RelancesHistorique key={`${order.id}-${order.statut}-${order.livreur}-${order.closer}-${order.date_relivraison}`} orderId={order.id} onAdded={onRelanceAdded} />
-
-        {showAppel && (
-          <div
-            onClick={() => setShowAppel(false)}
-            style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 60 }}
-          >
-            <div onClick={(e) => e.stopPropagation()} style={{ background: "white", width: "100%", maxWidth: 420, borderRadius: "18px 18px 0 0", padding: "20px 18px 28px" }}>
-              <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>Comment s'est passé l'appel ?</div>
-              <div style={{ fontSize: 12.5, color: "#8A9089", marginBottom: 16 }}>{order.client} — {order.tel}</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {[
-                  { key: "confirme_telephone", label: "✅ Confirmé par téléphone", couleur: "#1F9D6E" },
-                  { key: "pas_de_reponse", label: "📵 Pas de réponse", couleur: "#8A6412" },
-                  { key: "rappeler_plus_tard", label: "🕒 Rappeler plus tard", couleur: "#8A6412" },
-                  { key: "faux_numero", label: "🚫 Faux numéro", couleur: "#D64933" },
-                  { key: "refuse", label: "❌ Refusé par le client", couleur: "#D64933" },
-                ].map((motif) => (
-                  <button
-                    key={motif.key}
-                    onClick={async () => {
-                      await supabase.from("appels_commande").insert([{ commande_id: order.id, motif: motif.key }]);
-                      setShowAppel(false);
-                    }}
-                    style={{ background: "#FAFAF7", border: "1px solid #ECE8DC", borderRadius: 10, padding: "13px 16px", textAlign: "left", fontWeight: 600, fontSize: 14, cursor: "pointer", color: motif.couleur }}
-                  >
-                    {motif.label}
-                  </button>
-                ))}
-              </div>
-              <button onClick={() => setShowAppel(false)} style={{ width: "100%", marginTop: 10, background: "none", border: "none", color: "#8A9089", fontSize: 13, padding: "8px 0", cursor: "pointer" }}>
-                Annuler
-              </button>
-            </div>
-          </div>
-        )}
-
-        <div style={{ background: "#EAF7F1", border: "1px solid #CFEBDD", borderRadius: 12, padding: 14, marginBottom: 14 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#1F9D6E", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-            <Phone size={13} /> Script d'appel suggéré
-          </div>
-          <div style={{ fontSize: 13.5, marginTop: 6, lineHeight: 1.5 }}>{scriptAppel(order)}</div>
-        </div>
-
-        {order.statut !== "confirmee" && (
-          <a
-            href={`https://wa.me/${cleanPhoneForWhatsApp(order.tel)}?text=${encodeURIComponent(`Bonjour ${order.client.split(" ")[0]} 👋, suivez votre commande en direct ici : ${window.location.origin}/?suivi=${order.id}`)}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: "white", border: "1px solid #DDD8CC", color: "#16231F", padding: "12px 0", borderRadius: 10, fontWeight: 600, fontSize: 13.5, textDecoration: "none", marginBottom: 14 }}
-          >
-            🔗 Envoyer le lien de suivi au client
-          </a>
-        )}
-
-        {order.statut === "confirmee" && (
-          <a
-            href={merciWaLink(order)}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: "linear-gradient(135deg, #e8920a, #f0b94a)", color: "white", padding: "13px 0", borderRadius: 10, fontWeight: 700, fontSize: 14, textDecoration: "none", marginBottom: 14 }}
-          >
-            🙏 Envoyer message de remerciement + reçu
-          </a>
-        )}
-
-        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-          <button
-            onClick={() => genererFacturePDF(order)}
-            style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "white", border: "1px solid #DDD8CC", color: "#16231F", padding: "12px 0", borderRadius: 10, fontWeight: 600, fontSize: 13 }}
-          >
-            🧾 Facture PDF
-          </button>
-          <a
-            href={`https://wa.me/${cleanPhoneForWhatsApp(order.tel)}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "#EAF3DE", border: "1px solid #C7DDA3", color: "#3B6D11", padding: "12px 0", borderRadius: 10, fontWeight: 600, fontSize: 13, textDecoration: "none" }}
-          >
-            💬 Ouvrir WhatsApp du client
-          </a>
-        </div>
-
-        <div style={{ display: "flex", gap: 10 }}>
-          <a href={waLink(order)} target="_blank" rel="noopener noreferrer" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, background: "#1F9D6E", color: "white", padding: "12px 0", borderRadius: 10, fontWeight: 600, fontSize: 14, textDecoration: "none" }}>
-            <MessageCircle size={17} /> WhatsApp
-          </a>
-          <a href={`sms:${order.tel}?body=${encodeURIComponent(smsMsg(order))}`} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, background: "#1a7a3c", color: "white", padding: "12px 0", borderRadius: 10, fontWeight: 600, fontSize: 14, textDecoration: "none" }}>
-            <MessageSquare size={17} /> SMS
-          </a>
-          <a href={`tel:${order.tel}`} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, background: "white", border: "1px solid #DDD8CC", color: "#16231F", padding: "12px 18px", borderRadius: 10, fontWeight: 600, fontSize: 14, textDecoration: "none" }}>
-            <Phone size={17} />
-          </a>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function AddOrder({ onClose, onAdd }) {
-  const [form, setForm] = useState({ client: "", tel: "", produit: "", montant: "", zone: "", statut: "en_cours", derniere_tentative: "Nouvelle commande", type_livraison: "abidjan", frais_expedition: "", montant_depot: "", depot_recu: false });
-  const montantValide = Number(form.montant) > 0;
-  const estExpedition = form.type_livraison === "expedition";
-  const canSubmit = form.client.trim() && form.tel.trim() && form.produit.trim() && montantValide;
-
-  const totalAvecFrais = Number(form.montant || 0) + Number(form.frais_expedition || 0);
-
-  return (
-    <div className="rv-modal-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", zIndex: 50 }} onClick={onClose}>
-      <div className="rv-modal-sheet" onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", borderRadius: "18px 18px 0 0", padding: "18px 20px 28px", maxHeight: "88vh", overflowY: "auto" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 19 }}>Nouvelle commande</div>
-          <button onClick={onClose} style={{ background: "none", border: "none" }}><X size={20} /></button>
-        </div>
-
-        <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 6 }}>Zone de livraison</label>
-        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-          <button
-            onClick={() => setForm({ ...form, type_livraison: "abidjan" })}
-            style={{ flex: 1, padding: "12px 10px", borderRadius: 10, border: `2px solid ${!estExpedition ? "#1a7a3c" : "#DDD8CC"}`, background: !estExpedition ? "#EAF3DE" : "white", textAlign: "left", cursor: "pointer" }}
-          >
-            <div style={{ fontWeight: 700, fontSize: 13 }}>🏍️ Abidjan</div>
-            <div style={{ fontSize: 10.5, color: "#6B7168" }}>Paiement à la livraison</div>
-          </button>
-          <button
-            onClick={() => setForm({ ...form, type_livraison: "expedition" })}
-            style={{ flex: 1, padding: "12px 10px", borderRadius: 10, border: `2px solid ${estExpedition ? "#e8920a" : "#DDD8CC"}`, background: estExpedition ? "#FBF3E3" : "white", textAlign: "left", cursor: "pointer" }}
-          >
-            <div style={{ fontWeight: 700, fontSize: 13 }}>📦 Hors Abidjan</div>
-            <div style={{ fontSize: 10.5, color: "#6B7168" }}>Expédition avec dépôt</div>
-          </button>
-        </div>
-
-        {["client", "tel", "produit", "montant", "zone"].map((field) => (
-          <div key={field} style={{ marginBottom: 10 }}>
-            <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4, textTransform: "capitalize" }}>
-              {field === "tel" ? "Téléphone" : field === "montant" ? "Montant produit (FCFA)" : field === "zone" ? (estExpedition ? "Ville / région" : "zone") : field}
-            </label>
-            <input
-              value={form[field]}
-              onChange={(e) => setForm({ ...form, [field]: e.target.value })}
-              type={field === "montant" ? "number" : "text"}
-              min={field === "montant" ? "1" : undefined}
-              style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, background: "white" }}
-            />
-            {field === "montant" && form.montant && !montantValide && (
-              <div style={{ color: "#D64933", fontSize: 11.5, marginTop: 4 }}>Le montant doit être supérieur à 0.</div>
-            )}
-          </div>
-        ))}
-
-        {estExpedition && (
-          <div style={{ background: "white", border: "1px solid #F0DDA8", borderRadius: 12, padding: "14px 16px", marginBottom: 10 }}>
-            <div style={{ fontWeight: 700, fontSize: 13, color: "#8A6412", marginBottom: 10 }}>📦 Détails expédition</div>
-
-            <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4 }}>Frais d'expédition (FCFA)</label>
-            <input
-              value={form.frais_expedition}
-              onChange={(e) => setForm({ ...form, frais_expedition: e.target.value })}
-              type="number"
-              style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, background: "white", marginBottom: 10, boxSizing: "border-box" }}
-            />
-
-            {totalAvecFrais > 0 && (
-              <div style={{ background: "#FBF3E3", borderRadius: 8, padding: "8px 10px", marginBottom: 10, fontSize: 12.5, color: "#8A6412" }}>
-                Total à collecter : <strong>{totalAvecFrais.toLocaleString("fr-FR")} FCFA</strong>
-              </div>
+            {segment === "produit" && (
+              <select value={segmentProduit} onChange={(e) => setSegmentProduit(e.target.value)} style={{ width: "100%", padding: "9px 11px", borderRadius: 9, border: "1px solid #DDD8CC", fontSize: 13, marginBottom: 14, background: "white" }}>
+                <option value="">Choisir un produit...</option>
+                {produitsAchetes.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
             )}
 
-            <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4 }}>Montant du dépôt reçu (FCFA)</label>
-            <input
-              value={form.montant_depot}
-              onChange={(e) => setForm({ ...form, montant_depot: e.target.value, depot_recu: Number(e.target.value) > 0 })}
-              type="number"
-              style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, background: "white", boxSizing: "border-box" }}
+            <div style={{ background: "#EAF3DE", borderRadius: 10, padding: "8px 12px", fontSize: 12.5, color: "#3B6D11", marginBottom: 14 }}>
+              {clientsSegmentes.length} client{clientsSegmentes.length > 1 ? "s" : ""} concerné{clientsSegmentes.length > 1 ? "s" : ""}
+            </div>
+
+            <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 6 }}>Message (utilise {"{prenom}"} pour personnaliser)</label>
+            <textarea
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              placeholder={`Bonjour {prenom} 👋, une offre spéciale vous attend chez ${workspace.name} !`}
+              rows={4}
+              style={{ width: "100%", padding: "9px 11px", borderRadius: 9, border: "1px solid #DDD8CC", fontSize: 13, marginBottom: 10, boxSizing: "border-box", fontFamily: "inherit" }}
             />
-            <div style={{ fontSize: 11, color: "#8A9089", marginTop: 4 }}>Laisse à 0 si le dépôt n'a pas encore été reçu — le colis ne sera pas marqué prêt à expédier.</div>
-          </div>
-        )}
-
-        <button
-          disabled={!canSubmit}
-          onClick={() => canSubmit && onAdd(form)}
-          style={{ width: "100%", marginTop: 6, padding: "13px 0", borderRadius: 10, border: "none", background: canSubmit ? "#1a7a3c" : "#DDD8CC", color: "white", fontWeight: 600, fontSize: 14.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
-        >
-          <Check size={17} /> Ajouter la commande
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function ClientsView({ clients, onSelect }) {
-  return (
-    <div style={{ padding: "20px 20px 8px" }}>
-      <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 22, marginBottom: 4 }}>Clients</div>
-      <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 18 }}>{clients.length} client{clients.length > 1 ? "s" : ""} · classés par argent dépensé</div>
-
-      {clients.length === 0 && (
-        <div style={{ textAlign: "center", padding: "40px 0", color: "#8A9089", fontSize: 14 }}>Aucun client pour l'instant.</div>
-      )}
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {clients.map((c, i) => (
-          <button
-            key={i}
-            onClick={() => onSelect(c)}
-            style={{ textAlign: "left", background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}
-          >
-            <div>
-              <div style={{ fontWeight: 600, fontSize: 15, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                {i < 3 && c.montantTotal > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: "#e8920a", background: "#FBF3E3", padding: "1px 7px", borderRadius: 999 }}>🏆 TOP CLIENT</span>}
-                {c.joursDeRetard !== null && c.joursDeRetard >= 0 && <span style={{ fontSize: 10, fontWeight: 700, color: "#1a7a3c", background: "#EAF3DE", padding: "1px 7px", borderRadius: 999 }}>🔄 À relancer</span>}
-                {c.nom}
-              </div>
-              <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{c.tel} · {c.zone}</div>
-              {c.produitPrefere && (
-                <div style={{ fontSize: 11.5, color: "#8A9089", marginTop: 3 }}>Préfère : {c.produitPrefere}</div>
-              )}
-              <div style={{ fontSize: 12, marginTop: 5, display: "flex", gap: 10 }}>
-                <span style={{ color: "#1a7a3c" }}>{c.confirmees} livrée{c.confirmees > 1 ? "s" : ""}</span>
-                {c.echouees > 0 && <span style={{ color: "#D64933" }}>{c.echouees} échouée{c.echouees > 1 ? "s" : ""}</span>}
-              </div>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 15, color: "#1a7a3c" }}>{formatFCFA(c.montantTotal)}</div>
-              <div style={{ fontSize: 10.5, color: "#8A9089" }}>{c.total} commande{c.total > 1 ? "s" : ""}</div>
-            </div>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ClientDetail({ client, onClose, onSelectOrder }) {
-  return (
-    <div className="rv-modal-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", zIndex: 50 }} onClick={onClose}>
-      <div className="rv-modal-sheet" onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", maxHeight: "88vh", overflowY: "auto", borderRadius: "18px 18px 0 0", padding: "18px 20px 28px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-          <button onClick={onClose} style={{ background: "none", border: "none", padding: 4 }}>
-            <ChevronLeft size={22} />
-          </button>
-          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 19 }}>{client.nom}</div>
-        </div>
-        <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 16 }}>{client.tel} · {client.zone}</div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
-          <div style={{ background: "#EAF3DE", border: "1px solid #C7DDA3", borderRadius: 12, padding: "12px 14px" }}>
-            <div style={{ fontSize: 10.5, color: "#3B6D11", textTransform: "uppercase", letterSpacing: "0.03em" }}>Total dépensé</div>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 17, color: "#3B6D11", marginTop: 2 }}>{formatFCFA(client.montantTotal)}</div>
-          </div>
-          {client.produitPrefere && (
-            <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "12px 14px" }}>
-              <div style={{ fontSize: 10.5, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em" }}>Produit préféré</div>
-              <div style={{ fontWeight: 600, fontSize: 13.5, marginTop: 2 }}>{client.produitPrefere}</div>
-            </div>
-          )}
-        </div>
-
-        <div style={{ display: "flex", gap: 10, marginBottom: 18 }}>
-          <a
-            href={`https://wa.me/${cleanPhoneForWhatsApp(client.tel)}?text=${encodeURIComponent(`Bonjour ${client.nom.split(" ")[0]} 👋, c'est Azali Express. Comment pouvons-nous vous aider ?`)}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, background: "#1F9D6E", color: "white", padding: "11px 0", borderRadius: 10, fontWeight: 600, fontSize: 13.5, textDecoration: "none" }}
-          >
-            <MessageCircle size={16} /> WhatsApp
-          </a>
-          <a
-            href={`sms:${client.tel}?body=${encodeURIComponent(`Azali Express: Bonjour ${client.nom.split(" ")[0]}, comment pouvons-nous vous aider ?`)}`}
-            style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7, background: "#1a7a3c", color: "white", padding: "11px 0", borderRadius: 10, fontWeight: 600, fontSize: 13.5, textDecoration: "none" }}
-          >
-            <MessageSquare size={16} /> SMS
-          </a>
-          <a
-            href={`tel:${client.tel}`}
-            style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, background: "white", border: "1px solid #DDD8CC", color: "#16231F", padding: "11px 16px", borderRadius: 10, fontWeight: 600, fontSize: 13.5, textDecoration: "none" }}
-          >
-            <Phone size={16} />
-          </a>
-        </div>
-
-        <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 8 }}>
-          Historique des commandes ({client.commandes.length})
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {client.commandes.map((o) => {
-            const s = STATUS[o.statut];
-            return (
-              <button
-                key={o.id}
-                onClick={() => onSelectOrder(o)}
-                style={{ textAlign: "left", background: "white", border: "1px solid #ECE8DC", borderLeft: `4px solid ${s.color}`, borderRadius: 10, padding: "12px 14px", display: "flex", justifyContent: "space-between" }}
-              >
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: 14 }}>{o.produit}</div>
-                  <div style={{ fontSize: 11.5, color: s.color, marginTop: 3, fontWeight: 500 }}>{s.label}</div>
-                </div>
-                <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 14 }}>{formatFCFA(o.montant)}</div>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function LivreursView({ livreurs, onDelete, onToggleModeSimplifie, readOnly, periodLabel }) {
-  const maxTaux = Math.max(...livreurs.map((l) => l.taux ?? 0), 1);
-  const medailles = ["🥇", "🥈", "🥉"];
-  const totalDu = livreurs.reduce((s, l) => s + (l.montantDu || 0), 0);
-  const totalADeposer = livreurs.reduce((s, l) => s + (l.montantADeposer || 0), 0);
-
-  return (
-    <div style={{ padding: "20px 20px 8px" }}>
-      <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 22, marginBottom: 4 }}>Livreurs</div>
-      <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 4 }}>{livreurs.length} livreur{livreurs.length > 1 ? "s" : ""} · classés par taux de réussite</div>
-      {periodLabel && (
-        <div style={{ display: "inline-block", fontSize: 11, fontWeight: 600, color: "#1a7a3c", background: "#EAF3DE", padding: "3px 10px", borderRadius: 999, marginBottom: 14 }}>
-          📊 {periodLabel}
-        </div>
-      )}
-
-      {(totalDu > 0 || totalADeposer > 0) && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
-          <div style={{ background: "linear-gradient(135deg, #16231F, #1e2f28)", borderRadius: 14, padding: "14px 16px" }}>
-            <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.65)", textTransform: "uppercase", letterSpacing: "0.03em" }}>💵 À payer aux livreurs</div>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 19, color: "#e8920a", marginTop: 3 }}>{formatFCFA(totalDu)}</div>
-          </div>
-          <div style={{ background: "linear-gradient(135deg, #1a7a3c, #1F9D6E)", borderRadius: 14, padding: "14px 16px" }}>
-            <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.75)", textTransform: "uppercase", letterSpacing: "0.03em" }}>🏦 Dépôt attendu</div>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 19, color: "white", marginTop: 3 }}>{formatFCFA(totalADeposer)}</div>
-          </div>
-        </div>
-      )}
-
-      <CarteLivreurs livreurs={livreurs} />
-
-      {livreurs.length === 0 && (
-        <div style={{ textAlign: "center", padding: "40px 0", color: "#8A9089", fontSize: 14 }}>Aucun livreur ajouté.{!readOnly && ' Appuie sur "+" pour en ajouter un.'}</div>
-      )}
-
-      {livreurs.length > 1 && (
-        <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "16px 16px 10px", marginBottom: 14 }}>
-          <div style={{ fontSize: 11, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 12 }}>Comparatif — taux de réussite</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {livreurs.map((l) => (
-              <div key={l.id}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 3 }}>
-                  <span>{l.nom}</span>
-                  <span style={{ fontWeight: 600 }}>{l.taux !== null ? l.taux + "%" : "—"}</span>
-                </div>
-                <div style={{ background: "#ECE8DC", borderRadius: 999, height: 7, overflow: "hidden" }}>
-                  <div style={{ width: `${((l.taux ?? 0) / maxTaux) * 100}%`, background: "#1a7a3c", height: "100%", borderRadius: 999 }} />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {livreurs.map((l, i) => (
-          <div key={l.id} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "14px 16px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-              <div>
-                <div style={{ fontWeight: 600, fontSize: 15, display: "flex", alignItems: "center", gap: 6 }}>
-                  {i < 3 && total_ok(l) ? medailles[i] : null} {l.nom}
-                </div>
-                <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{l.telephone} · {l.zone}</div>
-                {!readOnly && (
-                  <button
-                    onClick={() => onToggleModeSimplifie(l.id, l.mode_simplifie)}
-                    style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", padding: 0, marginTop: 8, cursor: "pointer", fontSize: 11.5, color: l.mode_simplifie ? "#1a7a3c" : "#8A9089", fontWeight: 600 }}
-                  >
-                    <span style={{ width: 30, height: 17, borderRadius: 999, background: l.mode_simplifie ? "#1a7a3c" : "#DDD8CC", position: "relative", flexShrink: 0 }}>
-                      <span style={{ position: "absolute", top: 2, left: l.mode_simplifie ? 15 : 2, width: 13, height: 13, borderRadius: "50%", background: "white", transition: "left 0.15s" }} />
-                    </span>
-                    👁️ Mode simplifié (icônes, peu de lecture)
-                  </button>
-                )}
-              </div>
-              {!readOnly && (
-                <button onClick={() => onDelete(l.id)} style={{ background: "none", border: "none", color: "#D64933", padding: 6 }} aria-label="Retirer">
-                  <Trash2 size={17} />
-                </button>
-              )}
-            </div>
-            <div style={{ display: "flex", gap: 16, marginTop: 10, fontSize: 12.5 }}>
-              <span style={{ color: "#6B7168" }}>{l.total} commande{l.total > 1 ? "s" : ""}</span>
-              {l.taux !== null && <span style={{ color: "#1a7a3c", fontWeight: 600 }}>{l.taux}% réussite</span>}
-            </div>
-            {(l.montantRecupere > 0 || l.montantPerdu > 0) && (
-              <div style={{ display: "flex", gap: 16, marginTop: 6, fontSize: 12.5 }}>
-                <span style={{ color: "#1F9D6E" }}>+{formatFCFA(l.montantRecupere)} récupéré</span>
-                {l.montantPerdu > 0 && <span style={{ color: "#D64933" }}>-{formatFCFA(l.montantPerdu)} perdu</span>}
-              </div>
-            )}
-            {l.montantDu > 0 && (
-              <div style={{ marginTop: 10, background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 8, padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ fontSize: 12, color: "#8A6412", fontWeight: 600 }}>💵 Sa commission</span>
-                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 15, color: "#8A6412" }}>{formatFCFA(l.montantDu)}</span>
-              </div>
-            )}
-            {l.montantADeposer > 0 && (
-              <div style={{ marginTop: 6, background: "#EAF3DE", border: "1px solid #C7DDA3", borderRadius: 8, padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ fontSize: 12, color: "#3B6D11", fontWeight: 600 }}>🏦 Doit déposer</span>
-                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 15, color: "#3B6D11" }}>{formatFCFA(l.montantADeposer)}</span>
-              </div>
-            )}
-            <DetailProduitsLivreur produitsDetail={l.produitsDetail} />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function total_ok(l) {
-  return l.total > 0;
-}
-
-function DetailProduitsLivreur({ produitsDetail }) {
-  const [open, setOpen] = useState(false);
-  if (!produitsDetail || produitsDetail.length === 0) return null;
-
-  const totalRestant = produitsDetail.reduce((s, p) => s + p.restants, 0);
-
-  return (
-    <div style={{ marginTop: 10 }}>
-      <button
-        onClick={() => setOpen(!open)}
-        style={{ width: "100%", background: "none", border: "1px solid #ECE8DC", borderRadius: 8, padding: "8px 10px", fontSize: 12, fontWeight: 600, color: "#16231F", display: "flex", justifyContent: "space-between", alignItems: "center" }}
-      >
-        <span>📦 Détail par produit ({produitsDetail.length})</span>
-        <span style={{ color: totalRestant > 0 ? "#D64933" : "#8A9089" }}>
-          {totalRestant > 0 ? `${totalRestant} restant${totalRestant > 1 ? "s" : ""}` : "tout livré"} {open ? "▲" : "▼"}
-        </span>
-      </button>
-      {open && (
-        <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 6 }}>
-          {produitsDetail.map((p) => (
-            <div key={p.nom} style={{ background: "#FAFAF7", borderRadius: 7, padding: "7px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: 12, fontWeight: 500 }}>{p.nom}</span>
-              <div style={{ display: "flex", gap: 10, fontSize: 11.5 }}>
-                <span style={{ color: "#8A9089" }}>{p.assignes} assignés</span>
-                <span style={{ color: "#1F9D6E" }}>{p.livres} livrés</span>
-                <span style={{ color: p.restants > 0 ? "#D64933" : "#8A9089", fontWeight: 600 }}>{p.restants} restants</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function AddLivreur({ onClose, onAdd }) {
-  const [form, setForm] = useState({ nom: "", telephone: "", zone: "", email: "" });
-  const canSubmit = form.nom && form.telephone;
-
-  return (
-    <div className="rv-modal-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", zIndex: 50 }} onClick={onClose}>
-      <div className="rv-modal-sheet" onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", borderRadius: "18px 18px 0 0", padding: "18px 20px 28px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 19 }}>Nouveau livreur</div>
-          <button onClick={onClose} style={{ background: "none", border: "none" }}><X size={20} /></button>
-        </div>
-
-        {["nom", "telephone", "zone"].map((field) => (
-          <div key={field} style={{ marginBottom: 10 }}>
-            <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4, textTransform: "capitalize" }}>
-              {field === "telephone" ? "Téléphone" : field}
-            </label>
             <input
-              value={form[field]}
-              onChange={(e) => setForm({ ...form, [field]: e.target.value })}
-              style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, background: "white" }}
+              value={productLink}
+              onChange={(e) => setProductLink(e.target.value)}
+              placeholder="Lien à ajouter (optionnel)"
+              style={{ width: "100%", padding: "9px 11px", borderRadius: 9, border: "1px solid #DDD8CC", fontSize: 13, marginBottom: 16, boxSizing: "border-box" }}
             />
-          </div>
-        ))}
-
-        <div style={{ marginBottom: 10 }}>
-          <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4 }}>
-            Email de connexion (optionnel)
-          </label>
-          <input
-            type="email"
-            value={form.email}
-            onChange={(e) => setForm({ ...form, email: e.target.value })}
-            placeholder="pour lui donner un accès restreint à ses commandes"
-            style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, background: "white" }}
-          />
-          <div style={{ fontSize: 11, color: "#8A9089", marginTop: 4 }}>
-            Si renseigné (et un compte créé via "Inviter"), ce livreur ne verra que ses propres commandes en se connectant.
-          </div>
-        </div>
-
-        <button
-          disabled={!canSubmit}
-          onClick={() => canSubmit && onAdd(form)}
-          style={{ width: "100%", marginTop: 6, padding: "13px 0", borderRadius: 10, border: "none", background: canSubmit ? "#1a7a3c" : "#DDD8CC", color: "white", fontWeight: 600, fontSize: 14.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
-        >
-          <Check size={17} /> Ajouter le livreur
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function LoginScreen() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [errorMsg, setErrorMsg] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  async function submit() {
-    setErrorMsg("");
-    if (!email || !password) {
-      setErrorMsg("Remplis email et mot de passe.");
-      return;
-    }
-    setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) setErrorMsg(error.message === "Invalid login credentials" ? "Email ou mot de passe incorrect." : error.message);
-    setLoading(false);
-  }
-
-  return (
-    <div style={{ background: "#FAFAF7", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'IBM Plex Sans', sans-serif", padding: 20 }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,700&family=IBM+Plex+Sans:wght@400;500;600&display=swap');`}</style>
-      <div style={{ width: "100%", maxWidth: 360 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 9, marginBottom: 28 }}>
-          <div style={{ width: 30, height: 30, borderRadius: 8, background: "#1a7a3c", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <svg width="17" height="17" viewBox="0 0 100 100">
-              <polyline points="15,62 40,42 55,56 85,28" stroke="#e8920a" strokeWidth="11" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </div>
-          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 22 }}>
-            RECU<span style={{ color: "#e8920a" }}>VENTE</span>
-          </div>
-        </div>
-
-        <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 16, padding: 26 }}>
-          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 18, marginBottom: 4 }}>
-            Connexion
-          </div>
-          <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 20 }}>
-            Accède à ton espace Azali Express. Réservé aux comptes créés par l'administrateur.
-          </div>
-
-          <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4 }}>Email</label>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, marginBottom: 14 }}
-          />
-
-          <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4 }}>Mot de passe</label>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && submit()}
-            style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, marginBottom: 16 }}
-          />
-
-          {errorMsg && <div style={{ background: "#FBEAE6", color: "#D64933", fontSize: 12.5, padding: "8px 10px", borderRadius: 8, marginBottom: 12 }}>{errorMsg}</div>}
-
-          <button
-            onClick={submit}
-            disabled={loading}
-            style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none", background: "#1a7a3c", color: "white", fontWeight: 700, fontSize: 14.5, opacity: loading ? 0.6 : 1 }}
-          >
-            {loading ? "..." : "Se connecter"}
-          </button>
-
-          <div style={{ fontSize: 11.5, color: "#8A9089", textAlign: "center", marginTop: 14 }}>
-            Pas de compte ? Demande à ton administrateur de t'en créer un.
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function InviteModal({ onClose }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState("");
-  const [success, setSuccess] = useState(false);
-
-  async function submit() {
-    setErrorMsg("");
-    if (!email || !password) {
-      setErrorMsg("Remplis email et mot de passe.");
-      return;
-    }
-    setLoading(true);
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const res = await fetch("/api/invite-user", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionData.session?.access_token}` },
-        body: JSON.stringify({ email, password }),
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        setErrorMsg(json.error || "Erreur lors de la création du compte.");
-      } else {
-        setSuccess(true);
-      }
-    } catch (e) {
-      setErrorMsg("Erreur réseau: " + e.message);
-    }
-    setLoading(false);
-  }
-
-  return (
-    <div className="rv-modal-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", zIndex: 50 }} onClick={onClose}>
-      <div className="rv-modal-sheet" onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", borderRadius: "18px 18px 0 0", padding: "18px 20px 28px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 19 }}>Inviter quelqu'un</div>
-          <button onClick={onClose} style={{ background: "none", border: "none" }}><X size={20} /></button>
-        </div>
-
-        {success ? (
-          <div>
-            <div style={{ background: "#EAF3DE", color: "#3B6D11", fontSize: 13.5, padding: "14px", borderRadius: 10, marginBottom: 16 }}>
-              ✅ Compte créé pour <strong>{email}</strong>.<br />Communique-lui l'email et le mot de passe pour qu'il se connecte sur recuvente.vercel.app.
-            </div>
-            <button
-              onClick={onClose}
-              style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none", background: "#1a7a3c", color: "white", fontWeight: 600, fontSize: 14.5 }}
-            >
-              Fermer
-            </button>
-          </div>
-        ) : (
-          <>
-            <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 16 }}>
-              Crée un compte pour un membre de ton équipe (closer, etc.). Donne-lui ensuite l'email et le mot de passe.
-            </div>
-
-            <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4 }}>Email</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, marginBottom: 12 }}
-            />
-
-            <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4 }}>Mot de passe temporaire</label>
-            <input
-              type="text"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Au moins 6 caractères"
-              style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, marginBottom: 14 }}
-            />
-
-            {errorMsg && <div style={{ background: "#FBEAE6", color: "#D64933", fontSize: 12.5, padding: "8px 10px", borderRadius: 8, marginBottom: 12 }}>{errorMsg}</div>}
 
             <button
-              onClick={submit}
-              disabled={loading}
-              style={{ width: "100%", padding: "13px 0", borderRadius: 10, border: "none", background: "#1a7a3c", color: "white", fontWeight: 600, fontSize: 14.5, opacity: loading ? 0.6 : 1 }}
+              onClick={() => message.trim() && clientsSegmentes.length > 0 && setStarted(true)}
+              disabled={!message.trim() || clientsSegmentes.length === 0}
+              style={{ width: "100%", background: "#1a7a3c", color: "white", border: "none", borderRadius: 10, padding: "12px 0", fontWeight: 700, fontSize: 14, cursor: "pointer", opacity: (!message.trim() || clientsSegmentes.length === 0) ? 0.5 : 1 }}
             >
-              {loading ? "Création..." : "Créer le compte"}
+              Démarrer l'envoi
             </button>
           </>
         )}
-      </div>
-    </div>
-  );
-}
 
-function TeamModal({ onClose, currentUserId }) {
-  const [users, setUsers] = useState(null);
-  const [error, setError] = useState("");
-  const [deletingId, setDeletingId] = useState(null);
-  const [confirmId, setConfirmId] = useState(null);
+        {started && !finished && current && (
+          <div>
+            <div style={{ fontSize: 12, color: "#8A9089", marginBottom: 10 }}>{index + 1} / {clientsSegmentes.length}</div>
+            <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: 16, marginBottom: 14 }}>
+              <div style={{ fontWeight: 700, fontSize: 15 }}>{current.nom}</div>
+              <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{current.tel}</div>
+              <div style={{ marginTop: 10, fontSize: 13, whiteSpace: "pre-wrap", color: "#16231F" }}>{personalize(message, current.nom)}</div>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => { send(); next(); }} style={{ flex: 1, background: "#1F9D6E", color: "white", border: "none", borderRadius: 10, padding: "12px 0", fontWeight: 700, fontSize: 13.5, cursor: "pointer" }}>
+                💬 Envoyer et suivant
+              </button>
+              <button onClick={next} style={{ background: "white", border: "1px solid #DDD8CC", color: "#16231F", borderRadius: 10, padding: "0 16px", fontSize: 13, cursor: "pointer" }}>
+                Passer
+              </button>
+            </div>
+          </div>
+        )}
 
-  async function loadUsers() {
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const res = await fetch("/api/team", {
-        headers: { Authorization: `Bearer ${sessionData.session?.access_token}` },
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        setError(json.error || "Erreur de chargement");
-      } else {
-        setUsers(json.users);
-      }
-    } catch (e) {
-      setError("Erreur réseau: " + e.message);
-    }
-  }
-
-  useEffect(() => {
-    loadUsers();
-  }, []);
-
-  async function removeUser(id) {
-    setDeletingId(id);
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const res = await fetch("/api/team", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionData.session?.access_token}` },
-        body: JSON.stringify({ userId: id }),
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        setError(json.error || "Erreur lors de la suppression");
-      } else {
-        setUsers((prev) => prev.filter((u) => u.id !== id));
-      }
-    } catch (e) {
-      setError("Erreur réseau: " + e.message);
-    }
-    setDeletingId(null);
-    setConfirmId(null);
-  }
-
-  return (
-    <div className="rv-modal-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", zIndex: 50 }} onClick={onClose}>
-      <div className="rv-modal-sheet" onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", maxHeight: "80vh", overflowY: "auto", borderRadius: "18px 18px 0 0", padding: "18px 20px 28px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 19 }}>Équipe</div>
-          <button onClick={onClose} style={{ background: "none", border: "none" }}><X size={20} /></button>
-        </div>
-
-        {error && <div style={{ background: "#FBEAE6", color: "#D64933", fontSize: 12.5, padding: "8px 10px", borderRadius: 8, marginBottom: 12 }}>{error}</div>}
-
-        {users === null && !error && <div style={{ textAlign: "center", padding: "30px 0", color: "#8A9089", fontSize: 14 }}>Chargement...</div>}
-
-        {users && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {users.map((u) => (
-              <div key={u.id} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: 14 }}>
-                    {u.email} {u.id === currentUserId && <span style={{ fontSize: 11, color: "#1a7a3c", fontWeight: 600 }}>(toi)</span>}
-                  </div>
-                  <div style={{ fontSize: 11.5, color: "#8A9089", marginTop: 2 }}>
-                    {u.last_sign_in_at ? "Dernière connexion : " + new Date(u.last_sign_in_at).toLocaleDateString("fr-FR") : "Jamais connecté"}
-                  </div>
-                </div>
-                {u.id !== currentUserId && (
-                  confirmId === u.id ? (
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button
-                        onClick={() => removeUser(u.id)}
-                        disabled={deletingId === u.id}
-                        style={{ background: "#D64933", color: "white", border: "none", borderRadius: 7, padding: "6px 10px", fontSize: 11.5, fontWeight: 600 }}
-                      >
-                        {deletingId === u.id ? "..." : "Confirmer"}
-                      </button>
-                      <button
-                        onClick={() => setConfirmId(null)}
-                        style={{ background: "white", border: "1px solid #DDD8CC", borderRadius: 7, padding: "6px 10px", fontSize: 11.5 }}
-                      >
-                        Annuler
-                      </button>
-                    </div>
-                  ) : (
-                    <button onClick={() => setConfirmId(u.id)} style={{ background: "none", border: "none", color: "#D64933", padding: 6 }} aria-label="Retirer">
-                      <Trash2 size={16} />
-                    </button>
-                  )
-                )}
-              </div>
-            ))}
+        {finished && (
+          <div style={{ textAlign: "center", padding: "30px 0" }}>
+            <div style={{ fontSize: 36, marginBottom: 10 }}>🎉</div>
+            <div style={{ fontWeight: 700, fontSize: 16 }}>{sentCount} message{sentCount > 1 ? "s" : ""} envoyé{sentCount > 1 ? "s" : ""}</div>
+            <button onClick={onClose} style={{ marginTop: 16, background: "#1a7a3c", color: "white", border: "none", borderRadius: 10, padding: "10px 20px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+              Fermer
+            </button>
           </div>
         )}
       </div>
@@ -3457,70 +5741,25 @@ function TeamModal({ onClose, currentUserId }) {
   );
 }
 
-function RelancesHistorique({ orderId, onAdded }) {
-  const [relances, setRelances] = useState([]);
-  const [note, setNote] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [adding, setAdding] = useState(false);
-
-  async function load() {
-    const { data, error } = await supabase
-      .from("relances")
-      .select("*")
-      .eq("commande_id", orderId)
-      .order("created_at", { ascending: false });
-    if (!error) setRelances(data || []);
-    setLoading(false);
-  }
-
-  useEffect(() => {
-    load();
-  }, [orderId]);
-
-  async function addNote() {
-    if (!note.trim()) return;
-    setAdding(true);
-    const { error } = await supabase.from("relances").insert([{ commande_id: orderId, note: note.trim() }]);
-    if (!error) {
-      setNote("");
-      await load();
-      if (onAdded) onAdded();
-    }
-    setAdding(false);
-  }
-
+function RepartitionLigne({ r }) {
+  const [open, setOpen] = useState(false);
   return (
-    <div style={{ marginBottom: 14 }}>
-      <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 6 }}>
-        Historique des relances {relances.length > 0 && `(${relances.length})`}
-      </div>
-
-      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-        <input
-          type="text"
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && addNote()}
-          placeholder="Ex: Appelé, pas de réponse"
-          style={{ flex: 1, padding: "9px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 13 }}
-        />
-        <button
-          onClick={addNote}
-          disabled={adding || !note.trim()}
-          style={{ background: "#1a7a3c", color: "white", border: "none", borderRadius: 8, padding: "0 14px", fontSize: 13, fontWeight: 600 }}
-        >
-          Ajouter
-        </button>
-      </div>
-
-      {!loading && relances.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {relances.map((r) => (
-            <div key={r.id} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 8, padding: "8px 10px" }}>
-              <div style={{ fontSize: 13 }}>{r.note}</div>
-              <div style={{ fontSize: 10.5, color: "#8A9089", marginTop: 2 }}>
-                {new Date(r.created_at).toLocaleDateString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
-              </div>
+    <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 10, padding: "10px 12px" }}>
+      <button
+        onClick={() => setOpen(!open)}
+        style={{ width: "100%", background: "none", border: "none", display: "flex", justifyContent: "space-between", alignItems: "center", textAlign: "left", cursor: "pointer" }}
+      >
+        <span style={{ fontSize: 12.5 }}>
+          <strong>{r.closer}</strong> → <strong>{r.livreur}</strong>
+        </span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: "#1a7a3c" }}>{r.total} cmd {open ? "▲" : "▼"}</span>
+      </button>
+      {open && (
+        <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #F0EEE6", display: "flex", flexDirection: "column", gap: 5 }}>
+          {r.produitsListe.map((p) => (
+            <div key={p.nom} style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5 }}>
+              <span style={{ color: "#6B7168" }}>{p.nom}</span>
+              <span style={{ fontWeight: 600 }}>{p.qte} pièce{p.qte > 1 ? "s" : ""}</span>
             </div>
           ))}
         </div>
@@ -3529,174 +5768,161 @@ function RelancesHistorique({ orderId, onAdded }) {
   );
 }
 
-function TodayView({ todo, onSelectOrder, onRelancerTout, clientsARelancer = [], monProfilCloser, commandesNonAssigneesListe = [], onSeAttribuer, enAttenteDepot = [] }) {
-  const sections = [
-    { key: "aRelivrer", title: "📅 À relivrer aujourd'hui", items: todo.aRelivrer, color: "#1a7a3c", bg: "#EAF3DE" },
-    { key: "jamaisContactees", title: "🆕 Jamais contactées", items: todo.jamaisContactees, color: "#8A6412", bg: "#FBF3E3" },
-    { key: "sansNouvelles", title: "⏰ Sans nouvelles depuis 24h+", items: todo.sansNouvelles, color: "#D64933", bg: "#FBEAE6" },
-  ];
+function BatchRelanceModalSaas({ orders, currency, onClose, onLog }) {
+  const [index, setIndex] = useState(0);
+  const [done, setDone] = useState([]);
+  const current = orders[index];
+  const finished = index >= orders.length;
+
+  function next() {
+    setIndex((i) => i + 1);
+  }
+
+  async function sendAndLog() {
+    const text = `Bonjour ${(current.client || "").split(" ")[0]} 👋, votre commande "${current.produit}" (${Number(current.montant).toLocaleString("fr-FR")} ${currency}) est toujours en attente. Confirmez-vous la livraison ?`;
+    window.open(`https://wa.me/${cleanPhoneForWhatsApp(current.tel)}?text=${encodeURIComponent(text)}`, "_blank");
+    await onLog(current.id, "Relance groupée envoyée (WhatsApp)");
+    setDone((d) => [...d, current.id]);
+  }
 
   return (
-    <div style={{ padding: "20px 20px 8px" }}>
-      {monProfilCloser && commandesNonAssigneesListe.length > 0 && (
-        <div style={{ background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 14, padding: "14px 16px", marginBottom: 18 }}>
-          <div style={{ fontWeight: 700, fontSize: 14.5, color: "#8A6412", marginBottom: 2 }}>
-            🆓 Non assignées — à prendre ({commandesNonAssigneesListe.length})
-          </div>
-          <div style={{ fontSize: 12, color: "#8A6412", marginBottom: 10 }}>
-            Personne n'a encore pris ces commandes. Une fois prise, elle disparaît pour les autres closers.
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {commandesNonAssigneesListe.slice(0, 8).map((o) => (
-              <div key={o.id} style={{ background: "white", borderRadius: 10, padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, fontSize: 13.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.client}</div>
-                  <div style={{ fontSize: 11.5, color: "#6B7168" }}>{o.produit} · {formatFCFA(o.montant)}</div>
-                </div>
-                <button
-                  onClick={() => onSeAttribuer(o.id, monProfilCloser.nom)}
-                  style={{ flexShrink: 0, background: "#e8920a", color: "white", border: "none", borderRadius: 8, padding: "8px 12px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}
-                >
-                  Je la prends
-                </button>
-              </div>
-            ))}
-          </div>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 20 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", maxWidth: 380, borderRadius: 18, padding: "20px 20px 24px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 18 }}>Relance groupée</div>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer" }}>×</button>
         </div>
-      )}
 
-      {enAttenteDepot.length > 0 && (
-        <div style={{ background: "#FBEAE6", border: "1px solid #F0B8AC", borderRadius: 14, padding: "14px 16px", marginBottom: 18 }}>
-          <div style={{ fontWeight: 700, fontSize: 14.5, color: "#B23A22", marginBottom: 2 }}>
-            📦 Expéditions en attente de dépôt ({enAttenteDepot.length})
-          </div>
-          <div style={{ fontSize: 12, color: "#B23A22", marginBottom: 10 }}>
-            Ces colis ne peuvent pas partir tant que le dépôt n'est pas reçu.
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {enAttenteDepot.slice(0, 8).map((o) => (
-              <div key={o.id} onClick={() => onSelectOrder(o)} style={{ background: "white", borderRadius: 10, padding: "10px 12px", cursor: "pointer" }}>
-                <div style={{ fontWeight: 600, fontSize: 13.5 }}>{o.client}</div>
-                <div style={{ fontSize: 11.5, color: "#6B7168" }}>{o.produit} · {formatFCFA(o.montant + (o.frais_expedition || 0))} à collecter</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+        {!finished ? (
+          <>
+            <div style={{ fontSize: 12, color: "#8A9089", marginBottom: 14 }}>
+              {index + 1} / {orders.length} — {done.length} déjà contacté{done.length > 1 ? "s" : ""}
+            </div>
+            <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: 14, marginBottom: 12 }}>
+              <div style={{ fontWeight: 700, fontSize: 16 }}>{current.client}</div>
+              <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{current.tel} · {current.produit}</div>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 15, marginTop: 6, color: "#1a7a3c" }}>{Number(current.montant).toLocaleString("fr-FR")} {currency}</div>
+            </div>
 
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
-        <div>
-          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 22, marginBottom: 4 }}>Aujourd'hui</div>
-          <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 14 }}>
-            {todo.total > 0 ? `${todo.total} commande${todo.total > 1 ? "s" : ""} à traiter` : "Rien à traiter, tout est à jour ✅"}
+            <button onClick={sendAndLog} style={{ width: "100%", background: "#1F9D6E", color: "white", border: "none", padding: "11px 0", borderRadius: 10, fontWeight: 600, fontSize: 13.5, cursor: "pointer", marginBottom: 8 }}>
+              💬 Envoyer WhatsApp
+            </button>
+            <button onClick={next} style={{ width: "100%", padding: "11px 0", borderRadius: 10, border: "1px solid #DDD8CC", background: "white", color: "#16231F", fontWeight: 600, fontSize: 13.5, cursor: "pointer" }}>
+              {index < orders.length - 1 ? "Suivant →" : "Terminer"}
+            </button>
+          </>
+        ) : (
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <div style={{ fontSize: 36, marginBottom: 10 }}>✅</div>
+            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{done.length} relance{done.length > 1 ? "s" : ""} envoyée{done.length > 1 ? "s" : ""}</div>
+            <div style={{ fontSize: 12.5, color: "#6B7168", marginBottom: 18 }}>sur {orders.length} commandes de la liste</div>
+            <button onClick={onClose} style={{ background: "#1a7a3c", color: "white", border: "none", borderRadius: 10, padding: "10px 24px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+              Fermer
+            </button>
           </div>
-        </div>
-        {todo.total > 0 && (
-          <button
-            onClick={onRelancerTout}
-            style={{ background: "#1a7a3c", color: "white", border: "none", borderRadius: 10, padding: "10px 16px", fontSize: 13, fontWeight: 700, whiteSpace: "nowrap", flexShrink: 0 }}
-          >
-            Relancer tout
-          </button>
         )}
       </div>
-
-      {(todo.argentARisque > 0 || todo.argentRecuperable > 0) && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
-          <div style={{ background: "#FBEAE6", border: "1px solid #F0B8AC", borderRadius: 12, padding: "12px 14px" }}>
-            <div style={{ fontSize: 10.5, color: "#B23A22", textTransform: "uppercase", letterSpacing: "0.03em", fontWeight: 600 }}>💸 Argent à risque</div>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 19, marginTop: 3, color: "#D64933" }}>{formatFCFA(todo.argentARisque)}</div>
-          </div>
-          <div style={{ background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 12, padding: "12px 14px" }}>
-            <div style={{ fontSize: 10.5, color: "#8A6412", textTransform: "uppercase", letterSpacing: "0.03em", fontWeight: 600 }}>♻️ Récupérable</div>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 19, marginTop: 3, color: "#8A6412" }}>{formatFCFA(todo.argentRecuperable)}</div>
-          </div>
-        </div>
-      )}
-
-      {todo.total === 0 && (
-        <div style={{ textAlign: "center", padding: "50px 20px", color: "#8A9089" }}>
-          <div style={{ fontSize: 40, marginBottom: 10 }}>🎉</div>
-          <div style={{ fontSize: 14 }}>Aucune commande urgente pour le moment.</div>
-        </div>
-      )}
-
-      {sections.map((sec) => {
-        const montant = sec.items.reduce((s, o) => s + Number(o.montant), 0);
-        return sec.items.length > 0 ? (
-          <div key={sec.key} style={{ marginBottom: 20 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: sec.color }}>
-                {sec.title} ({sec.items.length})
-              </div>
-              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, fontWeight: 600, color: sec.color }}>
-                {formatFCFA(montant)}
-              </div>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {sec.items.map((o, oi) => (
-                <button
-                  key={o.id}
-                  onClick={() => onSelectOrder(o)}
-                  style={{ textAlign: "left", background: "white", border: "1px solid #ECE8DC", borderLeft: `4px solid ${sec.color}`, borderRadius: 10, padding: "12px 14px", display: "flex", alignItems: "center", gap: 10 }}
-                >
-                  <div style={{ width: 22, height: 22, borderRadius: "50%", background: oi === 0 ? sec.color : "#ECE8DC", color: oi === 0 ? "white" : "#8A9089", fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                    {oi + 1}
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 600, fontSize: 14.5, display: "flex", alignItems: "center", gap: 6 }}>
-                      {o.client}
-                      {oi === 0 && <span style={{ fontSize: 10, fontWeight: 700, color: sec.color, background: sec.bg, padding: "1px 7px", borderRadius: 999 }}>🔥 PRIORITÉ</span>}
-                    </div>
-                    <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{o.produit} · {o.tel}</div>
-                  </div>
-                  <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 14.5, flexShrink: 0 }}>{formatFCFA(o.montant)}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : null;
-      })}
-
-      {clientsARelancer.length > 0 && (
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "#1a7a3c", marginBottom: 3 }}>
-            🔄 Clients à relancer pour réachat ({clientsARelancer.length})
-          </div>
-          <div style={{ fontSize: 11.5, color: "#8A9089", marginBottom: 8 }}>
-            Basé sur leur rythme d'achat habituel — leur prochaine commande est probablement en retard.
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {clientsARelancer.slice(0, 10).map((c) => (
-              <a
-                key={c.tel}
-                href={`https://wa.me/${cleanPhoneForWhatsApp(c.tel)}?text=${encodeURIComponent(`Bonjour ${c.nom.split(" ")[0]} 👋, ça faisait un moment ! On voulait savoir si vous seriez intéressé(e) pour recommander ${c.produitPrefere || "un de nos produits"} chez Azali Express ?`)}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ textAlign: "left", background: "white", border: "1px solid #ECE8DC", borderLeft: "4px solid #1a7a3c", borderRadius: 10, padding: "12px 14px", display: "flex", alignItems: "center", gap: 10, textDecoration: "none", color: "inherit" }}
-              >
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600, fontSize: 14.5 }}>{c.nom}</div>
-                  <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>
-                    Achète en général tous les {c.intervalleMoyen}j · dernier achat il y a {c.joursDepuisDernier}j
-                  </div>
-                  {c.produitPrefere && (
-                    <div style={{ fontSize: 11.5, color: "#8A9089", marginTop: 2 }}>Préfère : {c.produitPrefere}</div>
-                  )}
-                </div>
-                <div style={{ background: "#1F9D6E", borderRadius: 8, padding: 8, display: "flex", flexShrink: 0 }}>
-                  <MessageCircle size={16} color="white" />
-                </div>
-              </a>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
 
-function ValidationsView({ orders, onSelectOrder }) {
+function ProduitsViewSaas({ produitsAvecBenefice, currency, onGererCatalogue }) {
+  const totalBenefice = produitsAvecBenefice.reduce((s, p) => s + p.beneficeRealise, 0);
+  const maxBenefice = Math.max(...produitsAvecBenefice.map((p) => p.beneficeRealise), 1);
+  const produitsSansCout = produitsAvecBenefice.filter((p) => !p.cout_achat || Number(p.cout_achat) === 0);
+  const produitsSansPrix = produitsAvecBenefice.filter((p) => !p.prix_vente || Number(p.prix_vente) === 0);
+
+  return (
+    <div style={{ padding: "20px 20px 8px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+        <div style={{ fontWeight: 700, fontSize: 22 }}>Produits</div>
+        <button
+          onClick={onGererCatalogue}
+          style={{ background: "white", border: "1px solid #DDD8CC", color: "#16231F", borderRadius: 9, padding: "8px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}
+        >
+          ⚙️ Gérer le catalogue
+        </button>
+      </div>
+      <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 18 }}>
+        {produitsAvecBenefice.length} produit{produitsAvecBenefice.length > 1 ? "s" : ""} · classés par bénéfice réalisé
+      </div>
+
+      <div style={{ background: "linear-gradient(135deg, #16231F, #1e2f28)", borderRadius: 14, padding: "16px 18px", marginBottom: 20 }}>
+        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.65)", textTransform: "uppercase", letterSpacing: "0.03em" }}>💰 Bénéfice total réalisé (toutes commandes livrées)</div>
+        <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 26, color: totalBenefice >= 0 ? "#7fd6a3" : "#f0a0a0", marginTop: 4 }}>
+          {totalBenefice.toLocaleString("fr-FR")} {currency}
+        </div>
+      </div>
+
+      {(produitsSansCout.length > 0 || produitsSansPrix.length > 0) && (
+        <div style={{ background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 12, padding: "12px 14px", marginBottom: 20, fontSize: 12, color: "#8A6412", lineHeight: 1.6 }}>
+          {produitsSansCout.length > 0 && <div>⚠️ {produitsSansCout.length} produit{produitsSansCout.length > 1 ? "s" : ""} sans coût d'achat renseigné — bénéfice sous-estimé pour eux.</div>}
+          {produitsSansPrix.length > 0 && <div>⚠️ {produitsSansPrix.length} produit{produitsSansPrix.length > 1 ? "s" : ""} sans prix de vente renseigné — invisible sur ta boutique publique.</div>}
+        </div>
+      )}
+
+      {produitsAvecBenefice.length === 0 && (
+        <div style={{ textAlign: "center", padding: "40px 0", color: "#8A9089", fontSize: 14 }}>
+          Aucun produit dans ton catalogue.
+          <button onClick={onGererCatalogue} style={{ display: "block", margin: "14px auto 0", background: "#1a7a3c", color: "white", border: "none", borderRadius: 9, padding: "9px 18px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+            + Ajouter mon premier produit
+          </button>
+        </div>
+      )}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {produitsAvecBenefice.map((p, i) => (
+          <div key={p.id} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "14px 16px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 14.5, display: "flex", alignItems: "center", gap: 6 }}>
+                  {i < 3 && p.beneficeRealise > 0 && ["🥇", "🥈", "🥉"][i]}
+                  {p.nom}
+                </div>
+                <div style={{ fontSize: 11.5, color: "#8A9089", marginTop: 2 }}>
+                  {p.commandees} commandée{p.commandees > 1 ? "s" : ""} · {p.livrees} livrée{p.livrees > 1 ? "s" : ""}
+                </div>
+              </div>
+              <div style={{ textAlign: "right", flexShrink: 0 }}>
+                <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 16, color: p.beneficeRealise >= 0 ? "#1a7a3c" : "#D64933" }}>
+                  {p.beneficeRealise.toLocaleString("fr-FR")} {currency}
+                </div>
+                <div style={{ fontSize: 10.5, color: "#8A9089" }}>bénéfice réalisé</div>
+              </div>
+            </div>
+
+            <div style={{ background: "#ECE8DC", borderRadius: 999, height: 6, overflow: "hidden", margin: "10px 0" }}>
+              <div style={{ width: `${Math.max(0, (p.beneficeRealise / maxBenefice) * 100)}%`, background: p.beneficeRealise >= 0 ? "#1a7a3c" : "#D64933", height: "100%", borderRadius: 999 }} />
+            </div>
+
+            <div style={{ display: "flex", gap: 8 }}>
+              <div style={{ flex: 1, background: "#FBEAE6", borderRadius: 8, padding: "7px 10px", textAlign: "center" }}>
+                <div style={{ fontSize: 9.5, color: "#B23A22", textTransform: "uppercase" }}>Prix d'achat</div>
+                <div style={{ fontWeight: 700, fontSize: 12.5, color: "#B23A22" }}>
+                  {p.cout_achat ? Number(p.cout_achat).toLocaleString("fr-FR") : "—"}
+                </div>
+              </div>
+              <div style={{ flex: 1, background: "#EAF3DE", borderRadius: 8, padding: "7px 10px", textAlign: "center" }}>
+                <div style={{ fontSize: 9.5, color: "#3B6D11", textTransform: "uppercase" }}>Prix de vente</div>
+                <div style={{ fontWeight: 700, fontSize: 12.5, color: "#3B6D11" }}>
+                  {p.prix_vente ? Number(p.prix_vente).toLocaleString("fr-FR") : "—"}
+                </div>
+              </div>
+              <div style={{ flex: 1, background: "#EAF0FB", borderRadius: 8, padding: "7px 10px", textAlign: "center" }}>
+                <div style={{ fontSize: 9.5, color: "#1E4B8C", textTransform: "uppercase" }}>Marge / pièce</div>
+                <div style={{ fontWeight: 700, fontSize: 12.5, color: "#1E4B8C" }}>
+                  {p.margeUnitaire.toLocaleString("fr-FR")}
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ValidationsViewSaas({ commandes, currency }) {
   const [tab, setTab] = useState("validees");
   const [datePreset, setDatePreset] = useState("semaine");
   const [customStart, setCustomStart] = useState("");
@@ -3734,51 +5960,43 @@ function ValidationsView({ orders, onSelectOrder }) {
   }, [datePreset, customStart, customEnd]);
 
   const validationsParJour = useMemo(() => {
-    const confirmeesAvecDate = orders.filter((o) => {
-      if (o.statut !== "confirmee" || !o.confirmed_at) return false;
-      const d = new Date(o.confirmed_at);
+    const confirmeesAvecDate = commandes.filter((c) => {
+      if (c.statut !== "confirmee" || !c.confirmed_at) return false;
+      const d = new Date(c.confirmed_at);
       return d >= dateRange.start && d < dateRange.end;
     });
     const map = {};
-    confirmeesAvecDate.forEach((o) => {
-      const dValidation = new Date(o.confirmed_at);
+    confirmeesAvecDate.forEach((c) => {
+      const dValidation = new Date(c.confirmed_at);
       const keyValidation = dValidation.toISOString().slice(0, 10);
-      const dCreation = new Date(o.created_at);
+      const dCreation = new Date(c.created_at);
       const keyCreation = dCreation.toISOString().slice(0, 10);
       const memeJour = keyValidation === keyCreation;
-      if (!map[keyValidation]) {
-        map[keyValidation] = {
-          date: keyValidation,
-          label: dValidation.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }),
-          orders: [],
-        };
-      }
-      map[keyValidation].orders.push({ ...o, memeJour, labelCreation: dCreation.toLocaleDateString("fr-FR", { day: "numeric", month: "short" }) });
+      if (!map[keyValidation]) map[keyValidation] = { date: keyValidation, label: dValidation.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }), orders: [] };
+      map[keyValidation].orders.push({ ...c, memeJour, labelCreation: dCreation.toLocaleDateString("fr-FR", { day: "numeric", month: "short" }) });
     });
     return Object.values(map).sort((a, b) => (a.date < b.date ? 1 : -1));
-  }, [orders, dateRange]);
+  }, [commandes, dateRange]);
 
   const nonValideesParJour = useMemo(() => {
-    const nonValidees = orders.filter((o) => {
-      if (o.statut !== "en_cours" && o.statut !== "echouee") return false;
-      const d = new Date(o.created_at);
+    const nonValidees = commandes.filter((c) => {
+      if (c.statut !== "en_cours" && c.statut !== "echouee") return false;
+      const d = new Date(c.created_at);
       return d >= dateRange.start && d < dateRange.end;
     });
     const map = {};
-    nonValidees.forEach((o) => {
-      const d = new Date(o.created_at);
+    nonValidees.forEach((c) => {
+      const d = new Date(c.created_at);
       const key = d.toISOString().slice(0, 10);
-      if (!map[key]) {
-        map[key] = { date: key, label: d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }), orders: [] };
-      }
-      map[key].orders.push(o);
+      if (!map[key]) map[key] = { date: key, label: d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }), orders: [] };
+      map[key].orders.push(c);
     });
     return Object.values(map).sort((a, b) => (a.date < b.date ? 1 : -1));
-  }, [orders, dateRange]);
+  }, [commandes, dateRange]);
 
   return (
-    <div style={{ padding: "20px 20px 8px" }}>
-      <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 22, marginBottom: 4 }}>Validations</div>
+    <div>
+      <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 4 }}>Validations</div>
       <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 14 }}>
         Ce qui a été confirmé, jour par jour — et ce qui attend encore.
       </div>
@@ -3795,7 +6013,7 @@ function ValidationsView({ orders, onSelectOrder }) {
           <button
             key={d.key}
             onClick={() => setDatePreset(d.key)}
-            style={{ padding: "6px 13px", borderRadius: 999, border: `1px solid ${datePreset === d.key ? "#1a7a3c" : "#DDD8CC"}`, background: datePreset === d.key ? "#1a7a3c" : "white", color: datePreset === d.key ? "white" : "#16231F", fontSize: 12.5, fontWeight: 500, whiteSpace: "nowrap", flexShrink: 0 }}
+            style={{ padding: "6px 13px", borderRadius: 999, border: `1px solid ${datePreset === d.key ? "#1a7a3c" : "#DDD8CC"}`, background: datePreset === d.key ? "#1a7a3c" : "white", color: datePreset === d.key ? "white" : "#16231F", fontSize: 12.5, fontWeight: 500, whiteSpace: "nowrap", flexShrink: 0, cursor: "pointer" }}
           >
             {d.label}
           </button>
@@ -3813,13 +6031,13 @@ function ValidationsView({ orders, onSelectOrder }) {
       <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
         <button
           onClick={() => setTab("validees")}
-          style={{ flex: 1, padding: "9px 0", borderRadius: 9, border: `1px solid ${tab === "validees" ? "#1a7a3c" : "#DDD8CC"}`, background: tab === "validees" ? "#1a7a3c" : "white", color: tab === "validees" ? "white" : "#16231F", fontWeight: 600, fontSize: 13 }}
+          style={{ flex: 1, padding: "9px 0", borderRadius: 9, border: `1px solid ${tab === "validees" ? "#1a7a3c" : "#DDD8CC"}`, background: tab === "validees" ? "#1a7a3c" : "white", color: tab === "validees" ? "white" : "#16231F", fontWeight: 600, fontSize: 13, cursor: "pointer" }}
         >
           ✅ Validées ({validationsParJour.reduce((s, g) => s + g.orders.length, 0)})
         </button>
         <button
           onClick={() => setTab("nonvalidees")}
-          style={{ flex: 1, padding: "9px 0", borderRadius: 9, border: `1px solid ${tab === "nonvalidees" ? "#D64933" : "#DDD8CC"}`, background: tab === "nonvalidees" ? "#D64933" : "white", color: tab === "nonvalidees" ? "white" : "#16231F", fontWeight: 600, fontSize: 13 }}
+          style={{ flex: 1, padding: "9px 0", borderRadius: 9, border: `1px solid ${tab === "nonvalidees" ? "#D64933" : "#DDD8CC"}`, background: tab === "nonvalidees" ? "#D64933" : "white", color: tab === "nonvalidees" ? "white" : "#16231F", fontWeight: 600, fontSize: 13, cursor: "pointer" }}
         >
           ⏳ Non validées ({nonValideesParJour.reduce((s, g) => s + g.orders.length, 0)})
         </button>
@@ -3830,7 +6048,6 @@ function ValidationsView({ orders, onSelectOrder }) {
           {validationsParJour.length === 0 && (
             <div style={{ textAlign: "center", padding: "40px 20px", color: "#8A9089" }}>
               <div style={{ fontSize: 14 }}>Aucune validation enregistrée pour l'instant.</div>
-              <div style={{ fontSize: 12, marginTop: 6 }}>Les nouvelles confirmations apparaîtront ici automatiquement.</div>
             </div>
           )}
           {validationsParJour.map((group) => (
@@ -3839,24 +6056,24 @@ function ValidationsView({ orders, onSelectOrder }) {
                 Validé {group.label} ({group.orders.length})
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {group.orders.map((o) => (
-                  <div key={o.id} onClick={() => onSelectOrder(o)} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 10, padding: "12px 14px", cursor: "pointer" }}>
+                {group.orders.map((c) => (
+                  <div key={c.id} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 10, padding: "12px 14px" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                       <div>
-                        <div style={{ fontWeight: 600, fontSize: 14 }}>{o.client}</div>
-                        <div style={{ fontSize: 12, color: "#6B7168" }}>{o.produit}</div>
+                        <div style={{ fontWeight: 600, fontSize: 14 }}>{c.client}</div>
+                        <div style={{ fontSize: 12, color: "#6B7168" }}>{c.produit}</div>
                       </div>
-                      <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 14 }}>{formatFCFA(o.montant)}</div>
+                      <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 14 }}>{Number(c.montant).toLocaleString("fr-FR")} {currency}</div>
                     </div>
                     <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
-                      {!o.memeJour && (
+                      {!c.memeJour && (
                         <span style={{ fontSize: 10.5, fontWeight: 600, color: "#8A6412", background: "#FBF3E3", padding: "2px 8px", borderRadius: 999 }}>
-                          📅 commandée le {o.labelCreation}
+                          📅 commandée le {c.labelCreation}
                         </span>
                       )}
-                      {o.confirmed_by && (
+                      {c.confirmed_by && (
                         <span style={{ fontSize: 10.5, fontWeight: 600, color: "#1a7a3c", background: "#EAF3DE", padding: "2px 8px", borderRadius: 999 }}>
-                          ✅ validé par {o.confirmed_by}
+                          ✅ validé par {c.confirmed_by}
                         </span>
                       )}
                     </div>
@@ -3882,14 +6099,14 @@ function ValidationsView({ orders, onSelectOrder }) {
                 Commandée {group.label} ({group.orders.length})
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {group.orders.map((o) => (
-                  <div key={o.id} onClick={() => onSelectOrder(o)} style={{ background: "white", border: "1px solid #ECE8DC", borderLeft: `4px solid ${o.statut === "echouee" ? "#D64933" : "#E8A93D"}`, borderRadius: 10, padding: "12px 14px", cursor: "pointer" }}>
+                {group.orders.map((c) => (
+                  <div key={c.id} style={{ background: "white", border: "1px solid #ECE8DC", borderLeft: `4px solid ${c.statut === "echouee" ? "#D64933" : "#E8A93D"}`, borderRadius: 10, padding: "12px 14px" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <div>
-                        <div style={{ fontWeight: 600, fontSize: 14 }}>{o.client}</div>
-                        <div style={{ fontSize: 12, color: "#6B7168" }}>{o.produit} · {o.statut === "echouee" ? "Échouée" : "En cours"}</div>
+                        <div style={{ fontWeight: 600, fontSize: 14 }}>{c.client}</div>
+                        <div style={{ fontSize: 12, color: "#6B7168" }}>{c.produit} · {c.statut === "echouee" ? "Échouée" : "En cours"}</div>
                       </div>
-                      <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 14 }}>{formatFCFA(o.montant)}</div>
+                      <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 14 }}>{Number(c.montant).toLocaleString("fr-FR")} {currency}</div>
                     </div>
                   </div>
                 ))}
@@ -3902,300 +6119,7 @@ function ValidationsView({ orders, onSelectOrder }) {
   );
 }
 
-function BatchRelanceModal({ orders, onClose, onLog }) {
-  const [index, setIndex] = useState(0);
-  const [done, setDone] = useState([]);
-  const current = orders[index];
-
-  function next() {
-    if (index < orders.length - 1) setIndex(index + 1);
-    else setIndex(orders.length);
-  }
-
-  async function sendAndLog(type) {
-    if (type === "whatsapp") {
-      window.open(waLink(current), "_blank");
-      await onLog(current.id, "Relance groupée envoyée (WhatsApp)");
-    } else {
-      window.location.href = `sms:${current.tel}?body=${encodeURIComponent(smsMsg(current))}`;
-      await onLog(current.id, "Relance groupée envoyée (SMS)");
-    }
-    setDone((d) => [...d, current.id]);
-  }
-
-  const finished = index >= orders.length;
-
-  return (
-    <div className="rv-modal-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 20 }} onClick={onClose}>
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{ background: "#FAFAF7", width: "100%", maxWidth: 380, borderRadius: 18, padding: "20px 20px 24px" }}
-      >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 18 }}>Relance groupée</div>
-          <button onClick={onClose} style={{ background: "none", border: "none" }}><X size={20} /></button>
-        </div>
-
-        {!finished ? (
-          <>
-            <div style={{ fontSize: 12, color: "#8A9089", marginBottom: 14 }}>
-              {index + 1} / {orders.length} — {done.length} déjà contacté{done.length > 1 ? "s" : ""}
-            </div>
-            <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: 14, marginBottom: 12 }}>
-              <div style={{ fontWeight: 700, fontSize: 16 }}>{current.client}</div>
-              <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{current.tel} · {current.produit}</div>
-              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 15, marginTop: 6, color: "#1a7a3c" }}>{formatFCFA(current.montant)}</div>
-            </div>
-
-            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-              <button
-                onClick={() => sendAndLog("whatsapp")}
-                style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "#1F9D6E", color: "white", border: "none", padding: "11px 0", borderRadius: 10, fontWeight: 600, fontSize: 13.5 }}
-              >
-                <MessageCircle size={16} /> WhatsApp
-              </button>
-              <button
-                onClick={() => sendAndLog("sms")}
-                style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "#1a7a3c", color: "white", border: "none", padding: "11px 0", borderRadius: 10, fontWeight: 600, fontSize: 13.5 }}
-              >
-                <MessageSquare size={16} /> SMS
-              </button>
-            </div>
-
-            <button
-              onClick={next}
-              style={{ width: "100%", padding: "11px 0", borderRadius: 10, border: "1px solid #DDD8CC", background: "white", color: "#16231F", fontWeight: 600, fontSize: 13.5 }}
-            >
-              {index < orders.length - 1 ? "Suivant →" : "Terminer"}
-            </button>
-          </>
-        ) : (
-          <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <div style={{ fontSize: 36, marginBottom: 10 }}>✅</div>
-            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{done.length} relance{done.length > 1 ? "s" : ""} envoyée{done.length > 1 ? "s" : ""}</div>
-            <div style={{ fontSize: 12.5, color: "#6B7168", marginBottom: 18 }}>sur {orders.length} commandes de la liste</div>
-            <button
-              onClick={onClose}
-              style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none", background: "#1a7a3c", color: "white", fontWeight: 600, fontSize: 14 }}
-            >
-              Fermer
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function CampagneModal({ clients, onClose }) {
-  const [segment, setSegment] = useState("tous");
-  const [segmentProduit, setSegmentProduit] = useState("");
-  const [message, setMessage] = useState("");
-  const [productLink, setProductLink] = useState("");
-  const [started, setStarted] = useState(false);
-  const [index, setIndex] = useState(0);
-  const [sentCount, setSentCount] = useState(0);
-
-  const PRODUITS_RAPIDES = [
-    { nom: "Peineili Spray", url: "https://www.azaliexpress.com/products/peineili-spray" },
-    { nom: "Dongyitang", url: "https://www.azaliexpress.com/products/zalidongyitangbaumechauffantarticulations" },
-    { nom: "Azali Tisane", url: "https://www.azaliexpress.com/products/azali" },
-    { nom: "Tampons Éclat", url: "https://www.azaliexpress.com/products/tampons-nettoyants" },
-    { nom: "AirFlow", url: "https://www.azaliexpress.com/products/azali-airflow-1" },
-  ];
-
-  const produitsAchetes = useMemo(() => {
-    const set = new Set();
-    clients.forEach((c) => c.commandes.forEach((o) => set.add((o.produit || "").split(" x")[0].trim())));
-    return Array.from(set).filter(Boolean);
-  }, [clients]);
-
-  const clientsSegmentes = useMemo(() => {
-    const now = new Date();
-    if (segment === "inactifs30") {
-      return clients.filter((c) => {
-        const dernier = c.commandes.reduce((max, o) => (new Date(o.created_at) > max ? new Date(o.created_at) : max), new Date(0));
-        return (now - dernier) / (1000 * 3600 * 24) >= 30;
-      });
-    }
-    if (segment === "produit" && segmentProduit) {
-      return clients.filter((c) => c.commandes.some((o) => (o.produit || "").split(" x")[0].trim() === segmentProduit));
-    }
-    if (segment === "vip") {
-      return clients.filter((c) => c.total >= 3);
-    }
-    return clients;
-  }, [clients, segment, segmentProduit]);
-
-  const current = clientsSegmentes[index];
-
-  function personalize(tpl, nom) {
-    let text = tpl.replace(/\{prenom\}/gi, (nom || "").split(" ")[0] || "");
-    if (productLink.trim()) text = text.trim() + "\n\n" + productLink.trim();
-    return text;
-  }
-
-  function send(type) {
-    const text = personalize(message, current.nom);
-    if (type === "whatsapp") {
-      window.open(`https://wa.me/${cleanPhoneForWhatsApp(current.tel)}?text=${encodeURIComponent(text)}`, "_blank");
-    } else {
-      window.location.href = `sms:${current.tel}?body=${encodeURIComponent(text)}`;
-    }
-    setSentCount((c) => c + 1);
-  }
-
-  function next() {
-    setIndex((i) => i + 1);
-  }
-
-  const finished = started && index >= clientsSegmentes.length;
-
-  return (
-    <div className="rv-modal-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 20 }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", maxWidth: 400, maxHeight: "85vh", overflowY: "auto", borderRadius: 18, padding: "20px 20px 24px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 18 }}>Campagne promo</div>
-          <button onClick={onClose} style={{ background: "none", border: "none" }}><X size={20} /></button>
-        </div>
-
-        {!started && (
-          <>
-            <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 6 }}>À qui envoyer ?</label>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 14 }}>
-              {[
-                { key: "tous", label: `Tous les clients (${clients.length})` },
-                { key: "vip", label: "Meilleurs clients — 3+ achats" },
-                { key: "inactifs30", label: "Inactifs depuis 30+ jours" },
-                { key: "produit", label: "Ayant acheté un produit précis" },
-              ].map((s) => (
-                <button
-                  key={s.key}
-                  onClick={() => setSegment(s.key)}
-                  style={{
-                    textAlign: "left",
-                    padding: "9px 12px",
-                    borderRadius: 9,
-                    border: "1px solid " + (segment === s.key ? "#1a7a3c" : "#DDD8CC"),
-                    background: segment === s.key ? "#EAF3DE" : "white",
-                    color: segment === s.key ? "#1a7a3c" : "#16231F",
-                    fontSize: 13,
-                    fontWeight: segment === s.key ? 600 : 500,
-                  }}
-                >
-                  {s.label}
-                </button>
-              ))}
-            </div>
-
-            {segment === "produit" && (
-              <select
-                value={segmentProduit}
-                onChange={(e) => setSegmentProduit(e.target.value)}
-                style={{ width: "100%", padding: "9px 12px", borderRadius: 9, border: "1px solid #DDD8CC", fontSize: 13, marginBottom: 14, background: "white" }}
-              >
-                <option value="">Choisir un produit...</option>
-                {produitsAchetes.map((p) => (
-                  <option key={p} value={p}>{p}</option>
-                ))}
-              </select>
-            )}
-
-            <div style={{ fontSize: 12.5, color: "#6B7168", marginBottom: 12 }}>
-              Écris ton message une fois. Utilise <strong>{"{prenom}"}</strong> pour insérer automatiquement le prénom de chaque client. Il sera envoyé à <strong>{clientsSegmentes.length} client{clientsSegmentes.length > 1 ? "s" : ""}</strong> un par un.
-            </div>
-            <textarea
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              rows={5}
-              placeholder="Ex: Bonjour {prenom} 👋, nouvelle promo chez Azali Express cette semaine : -20% sur tous les produits ! Réponds pour en profiter."
-              style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid #DDD8CC", fontSize: 13.5, marginBottom: 14, resize: "vertical" }}
-            />
-
-            <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 6 }}>Lien du produit (optionnel — WhatsApp affichera l'image automatiquement)</label>
-            <input
-              type="text"
-              value={productLink}
-              onChange={(e) => setProductLink(e.target.value)}
-              placeholder="https://www.azaliexpress.com/products/..."
-              style={{ width: "100%", padding: "9px 12px", borderRadius: 9, border: "1px solid #DDD8CC", fontSize: 13, marginBottom: 8 }}
-            />
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
-              {PRODUITS_RAPIDES.map((p) => (
-                <button
-                  key={p.url}
-                  onClick={() => setProductLink(p.url)}
-                  style={{ fontSize: 11, padding: "5px 10px", borderRadius: 999, border: "1px solid " + (productLink === p.url ? "#1a7a3c" : "#DDD8CC"), background: productLink === p.url ? "#EAF3DE" : "white", color: productLink === p.url ? "#1a7a3c" : "#6B7168", fontWeight: 500 }}
-                >
-                  {p.nom}
-                </button>
-              ))}
-            </div>
-
-            <button
-              onClick={() => setStarted(true)}
-              disabled={!message.trim() || clientsSegmentes.length === 0 || (segment === "produit" && !segmentProduit)}
-              style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none", background: message.trim() ? "#1a7a3c" : "#DDD8CC", color: "white", fontWeight: 700, fontSize: 14 }}
-            >
-              Démarrer l'envoi
-            </button>
-          </>
-        )}
-
-        {started && !finished && current && (
-          <>
-            <div style={{ fontSize: 12, color: "#8A9089", marginBottom: 14 }}>
-              {index + 1} / {clientsSegmentes.length} — {sentCount} envoyé{sentCount > 1 ? "s" : ""}
-            </div>
-            <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: 14, marginBottom: 12 }}>
-              <div style={{ fontWeight: 700, fontSize: 16 }}>{current.nom}</div>
-              <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{current.tel}</div>
-              <div style={{ fontSize: 13, marginTop: 10, background: "#FAFAF7", padding: 10, borderRadius: 8, color: "#16231F" }}>
-                {personalize(message, current.nom)}
-              </div>
-            </div>
-            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-              <button
-                onClick={() => send("whatsapp")}
-                style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "#1F9D6E", color: "white", border: "none", padding: "11px 0", borderRadius: 10, fontWeight: 600, fontSize: 13.5 }}
-              >
-                <MessageCircle size={16} /> WhatsApp
-              </button>
-              <button
-                onClick={() => send("sms")}
-                style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "#1a7a3c", color: "white", border: "none", padding: "11px 0", borderRadius: 10, fontWeight: 600, fontSize: 13.5 }}
-              >
-                <MessageSquare size={16} /> SMS
-              </button>
-            </div>
-            <button
-              onClick={next}
-              style={{ width: "100%", padding: "11px 0", borderRadius: 10, border: "1px solid #DDD8CC", background: "white", color: "#16231F", fontWeight: 600, fontSize: 13.5 }}
-            >
-              {index < clientsSegmentes.length - 1 ? "Suivant →" : "Terminer"}
-            </button>
-          </>
-        )}
-
-        {finished && (
-          <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <div style={{ fontSize: 36, marginBottom: 10 }}>📣</div>
-            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{sentCount} message{sentCount > 1 ? "s" : ""} envoyé{sentCount > 1 ? "s" : ""}</div>
-            <div style={{ fontSize: 12.5, color: "#6B7168", marginBottom: 18 }}>sur {clientsSegmentes.length} clients</div>
-            <button
-              onClick={onClose}
-              style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none", background: "#1a7a3c", color: "white", fontWeight: 600, fontSize: 14 }}
-            >
-              Fermer
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function CelebrationOverlay({ montant, client }) {
+function CelebrationOverlaySaas({ montant, client, currency }) {
   const [leaving, setLeaving] = useState(false);
 
   useEffect(() => {
@@ -4206,914 +6130,41 @@ function CelebrationOverlay({ montant, client }) {
   const confettiColors = ["#e8920a", "#1F9D6E", "#1a7a3c", "#f0b94a"];
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 100,
-        pointerEvents: "none",
-      }}
-    >
+    <div style={{ position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, pointerEvents: "none" }}>
       <div
-        className={leaving ? "rv-celebrate-out" : "rv-celebrate-in"}
-        style={{
-          background: "#16231F",
-          borderRadius: 20,
-          padding: "28px 36px",
-          textAlign: "center",
-          boxShadow: "0 20px 60px rgba(0,0,0,0.35)",
-          position: "relative",
-          overflow: "visible",
-        }}
+        className={leaving ? "rv-saas-celebrate-out" : "rv-saas-celebrate-in"}
+        style={{ background: "#16231F", borderRadius: 20, padding: "28px 36px", textAlign: "center", boxShadow: "0 20px 60px rgba(0,0,0,0.35)", position: "relative", overflow: "visible" }}
       >
         <div style={{ position: "absolute", top: -6, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 6 }}>
           {confettiColors.map((c, i) => (
-            <span
-              key={i}
-              className="rv-confetti"
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: i % 2 === 0 ? "50%" : 2,
-                background: c,
-                display: "inline-block",
-                animationDelay: `${i * 0.06}s`,
-              }}
-            />
+            <span key={i} className="rv-saas-confetti" style={{ width: 6, height: 6, borderRadius: i % 2 === 0 ? "50%" : 2, background: c, display: "inline-block", animationDelay: `${i * 0.06}s` }} />
           ))}
         </div>
-
         <div style={{ fontSize: 32, marginBottom: 6 }}>🎉</div>
         <div style={{ color: "rgba(255,255,255,0.65)", fontSize: 12.5, marginBottom: 4 }}>
           Vente récupérée{client ? ` — ${client.split(" ")[0]}` : ""}
         </div>
         <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 34, color: "#e8920a" }}>
-          +{formatFCFA(montant)}
+          +{Number(montant).toLocaleString("fr-FR")} {currency}
         </div>
       </div>
     </div>
   );
 }
 
-function ClosersView({ closers, onDelete, nonAssignees, periodLabel }) {
-  const maxTaux = Math.max(...closers.map((c) => c.taux ?? 0), 1);
-
-  return (
-    <div style={{ padding: "20px 20px 8px" }}>
-      <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 22, marginBottom: 4 }}>Closers</div>
-      <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 4 }}>{closers.length} closer{closers.length > 1 ? "s" : ""} · classés par taux de confirmation</div>
-      {periodLabel && (
-        <div style={{ display: "inline-block", fontSize: 11, fontWeight: 600, color: "#1a7a3c", background: "#EAF3DE", padding: "3px 10px", borderRadius: 999, marginBottom: 14 }}>
-          📊 {periodLabel}
-        </div>
-      )}
-
-      {nonAssignees > 0 && (
-        <div style={{ background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 12, padding: "10px 14px", marginBottom: 14, fontSize: 12.5, color: "#8A6412", fontWeight: 600 }}>
-          ⚠️ {nonAssignees} commande{nonAssignees > 1 ? "s" : ""} active{nonAssignees > 1 ? "s" : ""} non assignée{nonAssignees > 1 ? "s" : ""} à un closer
-        </div>
-      )}
-
-      {closers.length === 0 && (
-        <div style={{ textAlign: "center", padding: "40px 0", color: "#8A9089", fontSize: 14 }}>Aucun closer ajouté. Appuie sur "+" pour en ajouter un.</div>
-      )}
-
-      {closers.length > 1 && (
-        <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "16px 16px 10px", marginBottom: 14 }}>
-          <div style={{ fontSize: 11, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 12 }}>Comparatif — taux de confirmation</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {closers.map((c) => (
-              <div key={c.id}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 3 }}>
-                  <span>{c.nom}</span>
-                  <span style={{ fontWeight: 600 }}>{c.taux !== null ? c.taux + "%" : "—"}</span>
-                </div>
-                <div style={{ background: "#ECE8DC", borderRadius: 999, height: 7, overflow: "hidden" }}>
-                  <div style={{ width: `${((c.taux ?? 0) / maxTaux) * 100}%`, background: "#1a7a3c", height: "100%", borderRadius: 999 }} />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {closers.map((c) => (
-          <div key={c.id} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "14px 16px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-              <div>
-                <div style={{ fontWeight: 600, fontSize: 15 }}>{c.nom}</div>
-                <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{c.telephone}</div>
-              </div>
-              <button onClick={() => onDelete(c.id)} style={{ background: "none", border: "none", color: "#D64933", padding: 6 }} aria-label="Retirer">
-                <Trash2 size={17} />
-              </button>
-            </div>
-            <div style={{ display: "flex", gap: 14, marginTop: 10, fontSize: 12.5, flexWrap: "wrap" }}>
-              <span style={{ color: "#6B7168" }}>{c.total} commande{c.total > 1 ? "s" : ""}</span>
-              <span style={{ color: "#1a7a3c", fontWeight: 700 }}>✅ {c.confirmees} confirmée{c.confirmees > 1 ? "s" : ""}</span>
-              {c.taux !== null && <span style={{ color: "#8A9089" }}>({c.taux}%)</span>}
-              {c.enCours > 0 && <span style={{ color: "#8A6412" }}>{c.enCours} en cours</span>}
-            </div>
-            {c.montantRecupere > 0 && (
-              <div style={{ marginTop: 6, fontSize: 12.5, color: "#1F9D6E" }}>+{formatFCFA(c.montantRecupere)} récupéré</div>
-            )}
-            <DetailProduitsLivreur produitsDetail={c.produitsDetail} />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function AddCloser({ onClose, onAdd }) {
-  const [form, setForm] = useState({ nom: "", telephone: "", email: "" });
-  const canSubmit = form.nom;
-
-  return (
-    <div className="rv-modal-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", zIndex: 50 }} onClick={onClose}>
-      <div className="rv-modal-sheet" onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", borderRadius: "18px 18px 0 0", padding: "18px 20px 28px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 19 }}>Nouveau closer</div>
-          <button onClick={onClose} style={{ background: "none", border: "none" }}><X size={20} /></button>
-        </div>
-
-        {["nom", "telephone"].map((field) => (
-          <div key={field} style={{ marginBottom: 10 }}>
-            <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4, textTransform: "capitalize" }}>
-              {field === "telephone" ? "Téléphone (optionnel)" : field}
-            </label>
-            <input
-              value={form[field]}
-              onChange={(e) => setForm({ ...form, [field]: e.target.value })}
-              style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, background: "white" }}
-            />
-          </div>
-        ))}
-
-        <div style={{ marginBottom: 10 }}>
-          <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4 }}>
-            Email de connexion (optionnel)
-          </label>
-          <input
-            type="email"
-            value={form.email}
-            onChange={(e) => setForm({ ...form, email: e.target.value })}
-            placeholder="pour lui donner accès uniquement à ses commandes"
-            style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, background: "white" }}
-          />
-          <div style={{ fontSize: 11, color: "#8A9089", marginTop: 4 }}>
-            Si renseigné (et un compte créé via "Inviter"), ce closer verra uniquement ses commandes, avec relance/appel/SMS, sans pouvoir s'auto-attribuer d'autres commandes.
-          </div>
-        </div>
-
-        <button
-          disabled={!canSubmit}
-          onClick={() => canSubmit && onAdd(form)}
-          style={{ width: "100%", marginTop: 6, padding: "13px 0", borderRadius: 10, border: "none", background: canSubmit ? "#1a7a3c" : "#DDD8CC", color: "white", fontWeight: 600, fontSize: 14.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
-        >
-          <Check size={17} /> Ajouter le closer
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function CarteCommandeSimplifiee({ c, onConfirmer, onEchoue }) {
-  return (
-    <div style={{ background: "white", border: "2px solid #ECE8DC", borderRadius: 18, padding: 18 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
-        <div style={{ width: 50, height: 50, borderRadius: "50%", background: "#EAF3DE", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, flexShrink: 0 }}>
-          👤
-        </div>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 700, fontSize: 17 }}>{c.client}</div>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 22, color: "#1a7a3c" }}>{formatFCFA(c.montant)}</div>
-        </div>
-      </div>
-
-      <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#FAFAF7", borderRadius: 12, padding: "10px 14px", marginBottom: 14 }}>
-        <span style={{ fontSize: 22 }}>📍</span>
-        <span style={{ fontSize: 15, fontWeight: 600 }}>{c.zone}</span>
-      </div>
-
-      <a
-        href={`tel:${c.tel}`}
-        style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, background: "#2452E8", color: "white", padding: "16px 0", borderRadius: 14, fontWeight: 700, fontSize: 18, textDecoration: "none", marginBottom: 10 }}
-      >
-        📞 {c.tel}
-      </a>
-
-      <div style={{ display: "flex", gap: 10 }}>
-        <button
-          onClick={onConfirmer}
-          style={{ flex: 1, background: "#1F9D6E", color: "white", border: "none", padding: "20px 0", borderRadius: 14, fontSize: 32, cursor: "pointer" }}
-        >
-          ✅
-        </button>
-        <button
-          onClick={onEchoue}
-          style={{ flex: 1, background: "#D64933", color: "white", border: "none", padding: "20px 0", borderRadius: 14, fontSize: 32, cursor: "pointer" }}
-        >
-          ❌
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function LivreurPortal({ livreur, orders, onStatus, toast }) {
-  const [datePreset, setDatePreset] = useState("toutes");
-  const [customStart, setCustomStart] = useState("");
-  const [customEnd, setCustomEnd] = useState("");
-
-  const dateRange = useMemo(() => {
-    const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    let start, end;
-    if (datePreset === "aujourdhui") {
-      start = startOfToday;
-      end = new Date(startOfToday.getTime() + 86400000);
-    } else if (datePreset === "hier") {
-      start = new Date(startOfToday.getTime() - 86400000);
-      end = startOfToday;
-    } else if (datePreset === "avanthier") {
-      start = new Date(startOfToday.getTime() - 2 * 86400000);
-      end = new Date(startOfToday.getTime() - 86400000);
-    } else if (datePreset === "semaine") {
-      const day = startOfToday.getDay();
-      const diff = day === 0 ? 6 : day - 1;
-      start = new Date(startOfToday.getTime() - diff * 86400000);
-      end = new Date(now.getTime() + 60000);
-    } else if (datePreset === "personnalise" && customStart && customEnd) {
-      start = new Date(customStart + "T00:00:00");
-      end = new Date(customEnd + "T23:59:59");
-    } else {
-      start = new Date(0);
-      end = new Date(now.getTime() + 60000);
-    }
-    return { start, end };
-  }, [datePreset, customStart, customEnd]);
-
-  const activesToutes = orders.filter((o) => o.statut === "en_cours" || o.statut === "echouee");
-  const actives = activesToutes.filter((o) => {
-    const d = new Date(o.created_at);
-    return d >= dateRange.start && d < dateRange.end;
-  });
-  const actives_livraison = actives.filter((o) => o.type_livraison !== "expedition");
-  const actives_expedition = actives.filter((o) => o.type_livraison === "expedition");
-  const confirmees = orders.filter((o) => o.statut === "confirmee");
-  const [ongletActif, setOngletActif] = useState("livraison");
-  const [envoiPhotoId, setEnvoiPhotoId] = useState(null);
-
-  async function confirmerExpedition(orderId, fichierPhoto) {
-    if (!fichierPhoto) return;
-    if (fichierPhoto.size > 5 * 1024 * 1024) {
-      alert("La photo est trop lourde (max 5 Mo). Choisis une photo plus légère.");
-      return;
-    }
-    setEnvoiPhotoId(orderId);
-    const extension = fichierPhoto.name.split(".").pop();
-    const chemin = `${orderId}-${Date.now()}.${extension}`;
-    const { error: erreurUpload } = await supabase.storage.from("expeditions").upload(chemin, fichierPhoto, { upsert: true });
-    if (erreurUpload) {
-      alert("Erreur lors de l'envoi de la photo : " + erreurUpload.message);
-      setEnvoiPhotoId(null);
-      return;
-    }
-    const { data } = supabase.storage.from("expeditions").getPublicUrl(chemin);
-    await supabase.from("commandes").update({
-      photo_recu_expedition: data.publicUrl,
-      expedition_confirmee: true,
-      expedition_confirmee_le: new Date().toISOString(),
-      statut: "confirmee",
-      confirmed_at: new Date().toISOString(),
-      confirmed_by: livreur.nom,
-    }).eq("id", orderId);
-    await supabase.from("relances").insert([{ commande_id: orderId, note: `📦 Expédition confirmée par ${livreur.nom}, reçu photographié` }]);
-    setEnvoiPhotoId(null);
-  }
-
-  const produitsDetail = useMemo(() => {
-    const map = {};
-    orders.forEach((o) => {
-      const { nom, quantite } = parseProduitTexte(o.produit);
-      if (!nom) return;
-      if (!map[nom]) map[nom] = { nom, assignes: 0, livres: 0, restants: 0 };
-      map[nom].assignes += quantite;
-      if (o.statut === "confirmee") map[nom].livres += quantite;
-      else map[nom].restants += quantite;
-    });
-    return Object.values(map).sort((a, b) => b.assignes - a.assignes);
-  }, [orders]);
-
-  const bilanParJour = useMemo(() => {
-    const map = {};
-    confirmees.forEach((o) => {
-      const d = new Date(o.created_at);
-      const key = d.toISOString().slice(0, 10);
-      if (!map[key]) {
-        map[key] = { date: key, label: d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }), livrees: 0, gains: 0 };
-      }
-      map[key].livrees += 1;
-      map[key].gains += 1500;
-    });
-    return Object.values(map).sort((a, b) => (a.date < b.date ? 1 : -1));
-  }, [confirmees]);
-
-  const [showBilan, setShowBilan] = useState(false);
-
-  const [enTournee, setEnTournee] = useState(!!livreur.en_tournee);
-  const [gpsErreur, setGpsErreur] = useState(null);
-  const watchIdRef = useRef(null);
-
-  async function majPosition(lat, lng) {
-    await supabase.from("livreurs").update({ position_lat: lat, position_lng: lng, position_maj: new Date().toISOString() }).eq("id", livreur.id);
-  }
-
-  function demarrerTournee() {
-    if (!navigator.geolocation) {
-      setGpsErreur("La géolocalisation n'est pas disponible sur cet appareil.");
-      return;
-    }
-    setGpsErreur(null);
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        await supabase.from("livreurs").update({ en_tournee: true }).eq("id", livreur.id);
-        await majPosition(pos.coords.latitude, pos.coords.longitude);
-        setEnTournee(true);
-
-        watchIdRef.current = navigator.geolocation.watchPosition(
-          (p) => majPosition(p.coords.latitude, p.coords.longitude),
-          () => {},
-          { enableHighAccuracy: true, maximumAge: 15000, timeout: 20000 }
-        );
-      },
-      (err) => {
-        if (err.code === err.PERMISSION_DENIED) {
-          setGpsErreur("Autorisation de localisation refusée. Active-la dans les réglages de ton téléphone pour démarrer ta tournée.");
-        } else {
-          setGpsErreur("Impossible d'obtenir ta position pour le moment.");
-        }
-      },
-      { enableHighAccuracy: true, timeout: 15000 }
-    );
-  }
-
-  async function terminerTournee() {
-    if (watchIdRef.current !== null) {
-      navigator.geolocation.clearWatch(watchIdRef.current);
-      watchIdRef.current = null;
-    }
-    await supabase.from("livreurs").update({ en_tournee: false }).eq("id", livreur.id);
-    setEnTournee(false);
-  }
-
-  useEffect(() => {
-    return () => {
-      if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
-    };
-  }, []);
-
-  return (
-    <div style={{ background: "#FAFAF7", minHeight: "100vh", fontFamily: "'IBM Plex Sans', sans-serif", color: "#16231F" }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');`}</style>
-
-      <div style={{ background: "#1a7a3c", color: "white", padding: "24px 20px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 18 }}>
-          <div style={{ width: 26, height: 26, borderRadius: 7, background: "rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <svg width="15" height="15" viewBox="0 0 100 100">
-              <polyline points="15,62 40,42 55,56 85,28" stroke="#e8920a" strokeWidth="11" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </div>
-          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 17 }}>
-            RECU<span style={{ color: "#e8920a" }}>VENTE</span>
-          </div>
-          <button
-            onClick={() => supabase.auth.signOut()}
-            style={{ marginLeft: "auto", background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: "6px 12px", borderRadius: 7, fontSize: 12, fontWeight: 500 }}
-          >
-            Déconnexion
-          </button>
-        </div>
-        <div style={{ fontSize: 13, opacity: 0.8 }}>Bonjour</div>
-        <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 22 }}>{livreur.nom}</div>
-
-        <button
-          onClick={enTournee ? terminerTournee : demarrerTournee}
-          style={{
-            width: "100%",
-            marginTop: 14,
-            padding: "13px 0",
-            borderRadius: 10,
-            border: "none",
-            background: enTournee ? "#D64933" : "#e8920a",
-            color: "white",
-            fontWeight: 700,
-            fontSize: 14.5,
-          }}
-        >
-          {enTournee ? "🔴 Terminer ma tournée" : "🟢 Démarrer ma tournée"}
-        </button>
-        {enTournee && (
-          <div style={{ fontSize: 11.5, opacity: 0.8, marginTop: 6, textAlign: "center" }}>
-            📍 Ta position est partagée avec l'administrateur pendant ta tournée
-          </div>
-        )}
-        {gpsErreur && (
-          <div style={{ background: "rgba(214,73,51,0.2)", borderRadius: 8, padding: "8px 10px", marginTop: 8, fontSize: 12 }}>
-            {gpsErreur}
-          </div>
-        )}
-
-        <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-          <div style={{ flex: 1, background: "rgba(255,255,255,0.1)", borderRadius: 10, padding: "10px 12px" }}>
-            <div style={{ fontSize: 11, opacity: 0.75 }}>À traiter</div>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 20 }}>{actives.length}</div>
-          </div>
-          <div style={{ flex: 1, background: "rgba(255,255,255,0.1)", borderRadius: 10, padding: "10px 12px" }}>
-            <div style={{ fontSize: 11, opacity: 0.75 }}>Confirmées</div>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 20 }}>{confirmees.length}</div>
-          </div>
-        </div>
-
-        <div style={{ marginTop: 10, background: "rgba(232,146,10,0.18)", border: "1px solid rgba(232,146,10,0.35)", borderRadius: 10, padding: "12px 14px" }}>
-          <div style={{ fontSize: 11, opacity: 0.85 }}>💰 Mes gains ({confirmees.length} × 1 500 F)</div>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 22, color: "#e8920a", marginTop: 2 }}>
-            {formatFCFA(confirmees.length * 1500)}
-          </div>
-          {bilanParJour.length > 0 && (
-            <button
-              onClick={() => setShowBilan(!showBilan)}
-              style={{ marginTop: 8, background: "rgba(255,255,255,0.15)", border: "none", color: "white", borderRadius: 7, padding: "6px 10px", fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}
-            >
-              📊 {showBilan ? "Cacher" : "Voir"} mon bilan journalier
-            </button>
-          )}
-        </div>
-
-        {showBilan && bilanParJour.length > 0 && (
-          <div style={{ marginTop: 10, background: "rgba(255,255,255,0.08)", borderRadius: 10, padding: "12px 14px" }}>
-            <div style={{ fontSize: 10.5, opacity: 0.75, textTransform: "uppercase", marginBottom: 8 }}>Bilan par jour</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {bilanParJour.map((j) => (
-                <div key={j.date} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5 }}>
-                  <span style={{ textTransform: "capitalize", opacity: 0.9 }}>{j.label}</span>
-                  <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600 }}>
-                    {j.livrees} livrée{j.livrees > 1 ? "s" : ""} · {formatFCFA(j.gains)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div style={{ padding: "18px 20px" }}>
-        {produitsDetail.length > 0 && (
-          <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "14px 16px", marginBottom: 16 }}>
-            <div style={{ fontSize: 11, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>📦 Mes produits à livrer</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {produitsDetail.map((p) => (
-                <div key={p.nom} style={{ background: "#FAFAF7", borderRadius: 8, padding: "8px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-                  <span style={{ fontSize: 12.5, fontWeight: 500 }}>{p.nom}</span>
-                  <div style={{ display: "flex", gap: 10, fontSize: 11.5 }}>
-                    <span style={{ color: "#8A9089" }}>{p.assignes} au total</span>
-                    <span style={{ color: "#1F9D6E" }}>{p.livres} livrés</span>
-                    <span style={{ color: p.restants > 0 ? "#D64933" : "#8A9089", fontWeight: 600 }}>{p.restants} restants</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div style={{ display: "flex", gap: 6, marginBottom: 14, overflowX: "auto" }}>
-          {[
-            { key: "toutes", label: "Toutes" },
-            { key: "aujourdhui", label: "Aujourd'hui" },
-            { key: "hier", label: "Hier" },
-            { key: "avanthier", label: "Avant-hier" },
-            { key: "semaine", label: "Cette semaine" },
-            { key: "personnalise", label: "Personnalisé" },
-          ].map((d) => (
-            <button
-              key={d.key}
-              onClick={() => setDatePreset(d.key)}
-              style={{ padding: "6px 13px", borderRadius: 999, border: `1px solid ${datePreset === d.key ? "#1a7a3c" : "#DDD8CC"}`, background: datePreset === d.key ? "#1a7a3c" : "white", color: datePreset === d.key ? "white" : "#16231F", fontSize: 12.5, fontWeight: 500, whiteSpace: "nowrap", flexShrink: 0 }}
-            >
-              {d.label}
-            </button>
-          ))}
-        </div>
-
-        {datePreset === "personnalise" && (
-          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 14 }}>
-            <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 13 }} />
-            <span style={{ color: "#8A9089", fontSize: 12 }}>à</span>
-            <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 13 }} />
-          </div>
-        )}
-
-        <div style={{ fontSize: 12.5, color: "#8A9089", marginBottom: 10 }}>
-          {actives.length} commande{actives.length > 1 ? "s" : ""} à traiter{datePreset !== "toutes" ? " sur cette période" : ""}
-        </div>
-
-        {actives_expedition.length > 0 && (
-          <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-            <button
-              onClick={() => setOngletActif("livraison")}
-              style={{ flex: 1, padding: "9px 0", borderRadius: 9, border: `1px solid ${ongletActif === "livraison" ? "#1a7a3c" : "#DDD8CC"}`, background: ongletActif === "livraison" ? "#1a7a3c" : "white", color: ongletActif === "livraison" ? "white" : "#16231F", fontWeight: 600, fontSize: 13 }}
-            >
-              🏍️ Abidjan ({actives_livraison.length})
-            </button>
-            <button
-              onClick={() => setOngletActif("expedition")}
-              style={{ flex: 1, padding: "9px 0", borderRadius: 9, border: `1px solid ${ongletActif === "expedition" ? "#2452E8" : "#DDD8CC"}`, background: ongletActif === "expedition" ? "#2452E8" : "white", color: ongletActif === "expedition" ? "white" : "#16231F", fontWeight: 600, fontSize: 13 }}
-            >
-              📦 Expéditions ({actives_expedition.length})
-            </button>
-          </div>
-        )}
-
-        {ongletActif === "livraison" && (
-        actives_livraison.length === 0 ? (
-          <div style={{ textAlign: "center", padding: "50px 20px", color: "#8A9089" }}>
-            <div style={{ fontSize: 40, marginBottom: 10 }}>🎉</div>
-            <div style={{ fontSize: 14 }}>Aucune commande à traiter pour le moment.</div>
-          </div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {actives_livraison.map((o) => {
-              if (livreur.mode_simplifie) {
-                return (
-                  <CarteCommandeSimplifiee
-                    key={o.id}
-                    c={o}
-                    onConfirmer={() => setCommandeAConfirmer(o)}
-                    onEchoue={() => onStatus(o.id, "echouee")}
-                  />
-                );
-              }
-              const s = STATUS[o.statut];
-              return (
-                <div key={o.id} style={{ background: "white", border: "1px solid #ECE8DC", borderLeft: `4px solid ${s.color}`, borderRadius: 12, padding: "14px 16px" }}>
-                  <div style={{ fontWeight: 700, fontSize: 15.5 }}>{o.client}</div>
-                  <div style={{ fontSize: 13, color: "#6B7168", marginTop: 3 }}>{o.produit}</div>
-                  <div style={{ fontSize: 13, color: "#6B7168", marginTop: 2 }}>📍 {o.zone}</div>
-                  <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 17, marginTop: 8, color: "#1a7a3c" }}>{formatFCFA(o.montant)}</div>
-
-                  <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                    <a
-                      href={`tel:${o.tel}`}
-                      style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "white", border: "1px solid #DDD8CC", color: "#16231F", padding: "10px 0", borderRadius: 9, fontWeight: 600, fontSize: 13, textDecoration: "none" }}
-                    >
-                      <Phone size={15} /> {o.tel}
-                    </a>
-                  </div>
-                  <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                    <button
-                      onClick={() => setCommandeAConfirmer(o)}
-                      style={{ flex: 1, background: "#1F9D6E", color: "white", border: "none", padding: "11px 0", borderRadius: 9, fontWeight: 700, fontSize: 13.5 }}
-                    >
-                      ✅ Confirmer
-                    </button>
-                    <button
-                      onClick={() => onStatus(o.id, "echouee")}
-                      style={{ flex: 1, background: "#D64933", color: "white", border: "none", padding: "11px 0", borderRadius: 9, fontWeight: 700, fontSize: 13.5 }}
-                    >
-                      ❌ Échoué
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )
-        )}
-
-        {ongletActif === "expedition" && (
-          actives_expedition.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "50px 20px", color: "#8A9089" }}>
-              <div style={{ fontSize: 40, marginBottom: 10 }}>📦</div>
-              <div style={{ fontSize: 14 }}>Aucun colis à expédier pour le moment.</div>
-            </div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {actives_expedition.map((o) => (
-                <div key={o.id} style={{ background: "white", border: "1px solid #ECE8DC", borderLeft: "4px solid #2452E8", borderRadius: 12, padding: "14px 16px" }}>
-                  <div style={{ fontWeight: 700, fontSize: 15.5 }}>{o.client}</div>
-                  <div style={{ fontSize: 13, color: "#6B7168", marginTop: 3 }}>{o.produit}</div>
-                  <div style={{ fontSize: 13, color: "#2452E8", marginTop: 2, fontWeight: 600 }}>📦 Destination : {o.zone || "non précisée"}</div>
-                  <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 17, marginTop: 8, color: "#1a7a3c" }}>{formatFCFA(o.montant + (o.frais_expedition || 0))}</div>
-
-                  {!o.depot_recu && (
-                    <div style={{ background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 8, padding: "8px 10px", marginTop: 10, fontSize: 11.5, color: "#8A6412" }}>
-                      ⏳ En attente — l'administrateur doit d'abord confirmer avoir reçu le dépôt du client.
-                    </div>
-                  )}
-
-                  {o.depot_recu && !o.expedition_confirmee && (
-                    <label style={{ display: "block", textAlign: "center", width: "100%", background: "#2452E8", color: "white", padding: "11px 0", borderRadius: 9, fontWeight: 700, fontSize: 13.5, cursor: "pointer", marginTop: 12, boxSizing: "border-box" }}>
-                      {envoiPhotoId === o.id ? "Envoi en cours..." : "📷 Confirmer produit expédié (photo du reçu)"}
-                      <input
-                        type="file"
-                        accept="image/*"
-                        capture="environment"
-                        style={{ display: "none" }}
-                        onChange={(e) => confirmerExpedition(o.id, e.target.files?.[0])}
-                      />
-                    </label>
-                  )}
-
-                  {o.expedition_confirmee && (
-                    <div style={{ background: "#EAF3DE", border: "1px solid #C7DDA3", borderRadius: 8, padding: "9px 12px", marginTop: 10, fontSize: 12.5, color: "#3B6D11", fontWeight: 600, textAlign: "center" }}>
-                      ✅ Expédition confirmée
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )
-        )}
-      </div>
-
-      {toast && (
-        <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: "#16231F", color: "white", padding: "9px 18px", borderRadius: 999, fontSize: 13, fontWeight: 500 }}>
-          {toast}
-        </div>
-      )}
-
-      {commandeAConfirmer && (
-        <div
-          onClick={() => setCommandeAConfirmer(null)}
-          style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 60 }}
-        >
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "white", width: "100%", maxWidth: 420, borderRadius: "18px 18px 0 0", padding: "20px 18px 28px" }}>
-            <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>Comment le client a-t-il payé ?</div>
-            <div style={{ fontSize: 12.5, color: "#8A9089", marginBottom: 16 }}>{commandeAConfirmer.client} — {formatFCFA(commandeAConfirmer.montant)}</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {[
-                { key: "cash", label: "💵 Cash (espèces)" },
-                { key: "orange_money", label: "🟠 Orange Money" },
-                { key: "wave", label: "🌊 Wave" },
-                { key: "mtn_money", label: "🟡 MTN Money" },
-                { key: "moov_money", label: "🔵 Moov Money" },
-              ].map((mode) => (
-                <button
-                  key={mode.key}
-                  onClick={() => { onStatus(commandeAConfirmer.id, "confirmee", mode.key); setCommandeAConfirmer(null); }}
-                  style={{ background: "#FAFAF7", border: "1px solid #ECE8DC", borderRadius: 10, padding: "13px 16px", textAlign: "left", fontWeight: 600, fontSize: 14, cursor: "pointer" }}
-                >
-                  {mode.label}
-                </button>
-              ))}
-            </div>
-            <button onClick={() => setCommandeAConfirmer(null)} style={{ width: "100%", marginTop: 10, background: "none", border: "none", color: "#8A9089", fontSize: 13, padding: "8px 0", cursor: "pointer" }}>
-              Annuler
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function CloserPortal({ closer, orders, relanceCountByOrder, onStatus, onReschedule, onRelanceAdded, toast, onMarquerDepot }) {
-  const [selected, setSelected] = useState(null);
-
-  const todo = useMemo(() => {
-    const today = new Date();
-    const todayStr = today.toISOString().slice(0, 10);
-    const now24hAgo = new Date(today.getTime() - 24 * 3600 * 1000);
-    const byMontant = (a, b) => Number(b.montant) - Number(a.montant);
-
-    const actives = orders.filter((o) => o.statut === "en_cours" || o.statut === "echouee");
-
-    const aRelivrer = actives.filter((o) => o.date_relivraison === todayStr).sort(byMontant);
-
-    const jamaisContactees = actives
-      .filter((o) => !relanceCountByOrder.count[o.id] && aRelivrer.every((a) => a.id !== o.id))
-      .sort(byMontant);
-
-    const sansNouvelles = actives
-      .filter((o) => {
-        if (aRelivrer.some((a) => a.id === o.id)) return false;
-        if (jamaisContactees.some((j) => j.id === o.id)) return false;
-        const last = relanceCountByOrder.last[o.id];
-        if (!last) return false;
-        return new Date(last) < now24hAgo;
-      })
-      .sort(byMontant);
-
-    const dejaTraitees = actives.filter((o) =>
-      !aRelivrer.some((a) => a.id === o.id) &&
-      !jamaisContactees.some((j) => j.id === o.id) &&
-      !sansNouvelles.some((s) => s.id === o.id)
-    ).sort(byMontant);
-
-    const confirmees = orders.filter((o) => o.statut === "confirmee");
-
-    return { aRelivrer, jamaisContactees, sansNouvelles, dejaTraitees, confirmees, total: actives.length };
-  }, [orders, relanceCountByOrder]);
-
-  const sections = [
-    { key: "aRelivrer", title: "📅 À relivrer aujourd'hui", items: todo.aRelivrer, color: "#1a7a3c" },
-    { key: "jamaisContactees", title: "🆕 Jamais appelées", items: todo.jamaisContactees, color: "#8A6412" },
-    { key: "sansNouvelles", title: "⏰ Sans nouvelles depuis 24h+", items: todo.sansNouvelles, color: "#D64933" },
-    { key: "dejaTraitees", title: "✅ Déjà relancées récemment", items: todo.dejaTraitees, color: "#6B7168" },
-  ];
-
-  const montantRecupere = todo.confirmees.reduce((s, o) => s + Number(o.montant), 0);
-  const tauxConfirmation = orders.length ? Math.round((todo.confirmees.length / orders.length) * 100) : 0;
-
-  return (
-    <div style={{ background: "#FAFAF7", minHeight: "100vh", fontFamily: "'IBM Plex Sans', sans-serif", color: "#16231F", paddingBottom: 20 }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');
-        button { font-family: inherit; cursor: pointer; transition: transform 0.12s ease; }
-        button:active { transform: scale(0.97); }
-        .rv-mesh-blob { position: absolute; border-radius: 50%; filter: blur(40px); pointer-events: none; }
-        .rv-mesh-1 { width: 180px; height: 180px; background: radial-gradient(circle, rgba(232,146,10,0.45) 0%, rgba(232,146,10,0) 70%); top: -60px; right: -40px; animation: rvMeshFloat1 9s ease-in-out infinite; }
-        .rv-mesh-2 { width: 140px; height: 140px; background: radial-gradient(circle, rgba(127,214,163,0.4) 0%, rgba(127,214,163,0) 70%); bottom: -50px; left: 10%; animation: rvMeshFloat2 11s ease-in-out infinite; }
-        .rv-mesh-3 { width: 110px; height: 110px; background: radial-gradient(circle, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0) 70%); top: 20%; right: 25%; animation: rvMeshFloat3 7s ease-in-out infinite; }
-        @keyframes rvMeshFloat1 { 0%, 100% { transform: translate(0,0) scale(1); } 50% { transform: translate(-20px,20px) scale(1.15); } }
-        @keyframes rvMeshFloat2 { 0%, 100% { transform: translate(0,0) scale(1); } 50% { transform: translate(25px,-15px) scale(1.1); } }
-        @keyframes rvMeshFloat3 { 0%, 100% { transform: translate(0,0) scale(1); opacity: 0.6; } 50% { transform: translate(-15px,-10px) scale(1.3); opacity: 1; } }
-        .rv-wave-1 { animation: rvWaveDrift 9s linear infinite; }
-        .rv-wave-2 { animation: rvWaveDrift 14s linear infinite reverse; }
-        .rv-wave-3 { animation: rvWaveDrift 20s linear infinite; }
-        @keyframes rvWaveDrift { from { transform: translateX(0); } to { transform: translateX(-50%); } }
-        .rv-glow { animation: rvGlowBreathe 4s ease-in-out infinite; }
-        @keyframes rvGlowBreathe { 0%, 100% { opacity: 0.5; transform: scale(1); } 50% { opacity: 1; transform: scale(1.15); } }
-        .rv-3d-card { animation: rv3DFloat 6s ease-in-out infinite; transform-style: preserve-3d; }
-        @keyframes rv3DFloat {
-          0%, 100% { transform: rotateX(0deg) rotateY(0deg) translateZ(0); }
-          25% { transform: rotateX(3deg) rotateY(-4deg) translateZ(6px); }
-          50% { transform: rotateX(0deg) rotateY(0deg) translateZ(0); }
-          75% { transform: rotateX(-3deg) rotateY(4deg) translateZ(6px); }
-        }
-        .rv-glass-card { position: relative; overflow: hidden; border-radius: 12px; padding: 11px 13px; background: linear-gradient(155deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.06) 60%, rgba(255,255,255,0.1) 100%); border: 1px solid rgba(255,255,255,0.25); box-shadow: 0 4px 14px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.3), inset 0 -1px 0 rgba(0,0,0,0.08); }
-        .rv-glass-shine { position: absolute; top: -50%; left: -60%; width: 60%; height: 200%; background: linear-gradient(120deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.35) 50%, rgba(255,255,255,0) 100%); transform: rotate(20deg); animation: rvShineSweep 3.5s ease-in-out infinite; pointer-events: none; }
-        @keyframes rvShineSweep { 0% { left: -60%; } 35%, 100% { left: 140%; } }
-        .rv-livedot { animation: rvPulseDot 2s ease-in-out infinite; }
-        @keyframes rvPulseDot { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-      `}</style>
-
-      <div style={{ background: "#1a7a3c", color: "white", padding: "20px 16px 24px", position: "relative", overflow: "hidden" }}>
-        <div className="rv-mesh-blob rv-mesh-1" />
-        <div className="rv-mesh-blob rv-mesh-2" />
-        <div className="rv-mesh-blob rv-mesh-3" />
-
-        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 90, overflow: "hidden", pointerEvents: "none" }}>
-          <svg className="rv-wave-1" viewBox="0 0 400 60" preserveAspectRatio="none" style={{ position: "absolute", bottom: -5, width: "200%", height: 70 }}>
-            <path d="M0,30 C40,10 80,50 120,30 C160,10 200,50 240,30 C280,10 320,50 360,30 C380,20 390,25 400,30 L400,60 L0,60 Z" fill="rgba(232,146,10,0.55)" />
-          </svg>
-          <svg className="rv-wave-2" viewBox="0 0 400 60" preserveAspectRatio="none" style={{ position: "absolute", bottom: -8, width: "200%", height: 60 }}>
-            <path d="M0,25 C50,45 90,5 140,25 C190,45 230,5 280,25 C330,45 370,5 400,20 L400,60 L0,60 Z" fill="rgba(255,255,255,0.4)" />
-          </svg>
-          <svg className="rv-wave-3" viewBox="0 0 400 60" preserveAspectRatio="none" style={{ position: "absolute", bottom: -3, width: "200%", height: 50 }}>
-            <path d="M0,35 C60,15 100,45 160,25 C220,5 260,45 320,25 C360,10 380,30 400,25 L400,60 L0,60 Z" fill="rgba(248,180,60,0.4)" />
-          </svg>
-        </div>
-
-        <div style={{ position: "relative", zIndex: 1 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div style={{ width: 24, height: 24, borderRadius: 7, background: "rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-              <svg width="14" height="14" viewBox="0 0 100 100">
-                <polyline points="15,62 40,42 55,56 85,28" stroke="#e8920a" strokeWidth="11" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </div>
-            <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 17 }}>
-              RECU<span style={{ color: "#e8920a" }}>VENTE</span>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 4, opacity: 0.65 }}>
-              <span className="rv-livedot" style={{ width: 6, height: 6, borderRadius: "50%", background: "#7fd6a3", display: "inline-block" }} />
-              <span style={{ fontSize: 9.5, fontWeight: 500 }}>EN DIRECT</span>
-            </div>
-            <button
-              onClick={() => supabase.auth.signOut()}
-              style={{ marginLeft: "auto", background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: "6px 12px", borderRadius: 7, fontSize: 12, fontWeight: 500 }}
-            >
-              Déconnexion
-            </button>
-          </div>
-
-          <div style={{ marginTop: 18, fontSize: 13, opacity: 0.8 }}>Bonjour</div>
-          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 22 }}>{closer.nom}</div>
-
-          <div style={{ marginTop: 16, perspective: "800px" }}>
-            <div className="rv-3d-card" style={{ position: "relative", padding: "12px 14px", borderRadius: 14, background: "linear-gradient(155deg, rgba(255,255,255,0.14) 0%, rgba(255,255,255,0.03) 70%)", border: "1px solid rgba(255,255,255,0.18)", boxShadow: "0 10px 24px rgba(0,0,0,0.2)" }}>
-              <div className="rv-glow" style={{ position: "absolute", top: -16, left: -16, width: 100, height: 100, borderRadius: "50%", background: "radial-gradient(circle, rgba(232,146,10,0.35) 0%, rgba(232,146,10,0) 70%)", pointerEvents: "none" }} />
-              <div style={{ fontSize: 11, opacity: 0.75, textTransform: "uppercase", letterSpacing: "0.04em", position: "relative" }}>Argent récupéré (mes commandes)</div>
-              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 30, marginTop: 3, color: "#e8920a", position: "relative" }}>
-                {formatFCFA(montantRecupere)}
-              </div>
-            </div>
-          </div>
-
-          <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
-            <div className="rv-glass-card" style={{ flex: 1 }}>
-              <div className="rv-glass-shine" />
-              <div style={{ fontSize: 10.5, opacity: 0.75, position: "relative" }}>À traiter</div>
-              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 19, position: "relative" }}>{todo.total}</div>
-            </div>
-            <div className="rv-glass-card" style={{ flex: 1 }}>
-              <div className="rv-glass-shine" />
-              <div style={{ fontSize: 10.5, opacity: 0.75, position: "relative" }}>Confirmées</div>
-              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 19, position: "relative" }}>{todo.confirmees.length}</div>
-            </div>
-            <div className="rv-glass-card" style={{ flex: 1 }}>
-              <div className="rv-glass-shine" />
-              <div style={{ fontSize: 10.5, opacity: 0.75, position: "relative" }}>Taux</div>
-              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 19, position: "relative" }}>{tauxConfirmation}%</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div style={{ padding: "18px 20px" }}>
-        {todo.total === 0 ? (
-          <div style={{ textAlign: "center", padding: "50px 20px", color: "#8A9089" }}>
-            <div style={{ fontSize: 40, marginBottom: 10 }}>🎉</div>
-            <div style={{ fontSize: 14 }}>Aucune commande à traiter pour le moment.</div>
-          </div>
-        ) : (
-          sections.map((sec) =>
-            sec.items.length > 0 ? (
-              <div key={sec.key} style={{ marginBottom: 20 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color: sec.color }}>
-                  {sec.title} ({sec.items.length})
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {sec.items.map((o, oi) => (
-                    <button
-                      key={o.id}
-                      onClick={() => setSelected(o)}
-                      style={{ textAlign: "left", background: "white", border: "1px solid #ECE8DC", borderLeft: `4px solid ${sec.color}`, borderRadius: 10, padding: "12px 14px", display: "flex", alignItems: "center", gap: 10 }}
-                    >
-                      <div style={{ width: 20, height: 20, borderRadius: "50%", background: oi === 0 && sec.key !== "dejaTraitees" ? sec.color : "#ECE8DC", color: oi === 0 && sec.key !== "dejaTraitees" ? "white" : "#8A9089", fontSize: 10.5, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                        {oi + 1}
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 600, fontSize: 14.5 }}>{o.client}</div>
-                        <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{o.produit} · {o.tel}</div>
-                      </div>
-                      <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 14.5, flexShrink: 0 }}>{formatFCFA(o.montant)}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : null
-          )
-        )}
-      </div>
-
-      {selected && (
-        <OrderDetail
-          order={selected}
-          onClose={() => setSelected(null)}
-          onStatus={(id, statut) => { onStatus(id, statut); setSelected(null); }}
-          onReschedule={onReschedule}
-          onRelanceAdded={onRelanceAdded}
-          onMarquerDepot={onMarquerDepot}
-        />
-      )}
-
-      {toast && (
-        <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: "#16231F", color: "white", padding: "9px 18px", borderRadius: 999, fontSize: 13, fontWeight: 500 }}>
-          {toast}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function CarteLivreurs({ livreurs }) {
+function CarteLivreursSaas({ livreurs }) {
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const markersRef = useRef([]);
 
-  const enTourneeAvecPosition = livreurs.filter(
-    (l) => l.en_tournee && l.position_lat && l.position_lng
-  );
+  const enTourneeAvecPosition = livreurs.filter((l) => l.en_tournee && l.position_lat && l.position_lng);
 
   useEffect(() => {
     if (!window.L || !mapRef.current) return;
 
     if (!mapInstanceRef.current) {
-      mapInstanceRef.current = window.L.map(mapRef.current, {
-        zoomControl: true,
-        attributionControl: true,
-      }).setView([5.359952, -4.008256], 12);
-
-      window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution: "© OpenStreetMap",
-        maxZoom: 19,
-      }).addTo(mapInstanceRef.current);
+      mapInstanceRef.current = window.L.map(mapRef.current, { zoomControl: true, attributionControl: true }).setView([5.359952, -4.008256], 12);
+      window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "© OpenStreetMap", maxZoom: 19 }).addTo(mapInstanceRef.current);
     }
 
     markersRef.current.forEach((m) => m.remove());
@@ -5151,729 +6202,506 @@ function CarteLivreurs({ livreurs }) {
           <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#1F9D6E", display: "inline-block", animation: "rvPulseDot 2s ease-in-out infinite" }} />
         )}
       </div>
-      <div
-        ref={mapRef}
-        style={{ width: "100%", height: 220, borderRadius: 12, overflow: "hidden", border: "1px solid #ECE8DC", background: "#EEF0EA" }}
-      />
+      <div ref={mapRef} style={{ width: "100%", height: 220, borderRadius: 12, overflow: "hidden", border: "1px solid #ECE8DC", background: "#EEF0EA" }} />
       {enTourneeAvecPosition.length === 0 && (
         <div style={{ fontSize: 12, color: "#8A9089", marginTop: 6 }}>Aucun livreur en tournée pour le moment.</div>
       )}
     </div>
   );
 }
-
-function ComptablesModal({ comptables, onDelete, onAddClick, onClose }) {
-  return (
-    <div className="rv-modal-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", zIndex: 50 }} onClick={onClose}>
-      <div className="rv-modal-sheet" onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", maxHeight: "80vh", overflowY: "auto", borderRadius: "18px 18px 0 0", padding: "18px 20px 28px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 19 }}>Comptables</div>
-          <button onClick={onClose} style={{ background: "none", border: "none" }}><X size={20} /></button>
-        </div>
-
-        <div style={{ fontSize: 12.5, color: "#6B7168", marginBottom: 14 }}>
-          Accès en lecture seule à la comptabilité (commandes, montants, dépôts) — aucune modification possible, aucune gestion d'équipe.
-        </div>
-
-        <button
-          onClick={onAddClick}
-          style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none", background: "#1a7a3c", color: "white", fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginBottom: 16 }}
-        >
-          <Plus size={17} /> Ajouter un comptable
-        </button>
-
-        {comptables.length === 0 && (
-          <div style={{ textAlign: "center", padding: "30px 0", color: "#8A9089", fontSize: 14 }}>Aucun comptable ajouté.</div>
-        )}
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {comptables.map((c) => (
-            <div key={c.id} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <div style={{ fontWeight: 600, fontSize: 14 }}>{c.nom}</div>
-                <div style={{ fontSize: 12, color: "#6B7168", marginTop: 2 }}>{c.email || "Pas d'email — pas encore de connexion possible"}</div>
-              </div>
-              <button onClick={() => onDelete(c.id)} style={{ background: "none", border: "none", color: "#D64933", padding: 6 }} aria-label="Retirer">
-                <Trash2 size={17} />
-              </button>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function AddComptable({ onClose, onAdd }) {
-  const [form, setForm] = useState({ nom: "", email: "", telephone: "" });
-  const canSubmit = form.nom;
+function AideModal({ onClose }) {
+  const lienWhatsapp = "https://wa.me/2250509281403";
+  const lienGuidePdf = "https://jlrvtwnbtvpurhjdtzly.supabase.co/storage/v1/object/public/boutique/guide-recuvente.pdf";
+  const lienQrCode = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(lienWhatsapp)}`;
 
   return (
-    <div className="rv-modal-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", zIndex: 55 }} onClick={onClose}>
-      <div className="rv-modal-sheet" onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", borderRadius: "18px 18px 0 0", padding: "18px 20px 28px" }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "white", borderRadius: 16, padding: 24, width: "100%", maxWidth: 380, maxHeight: "85vh", overflowY: "auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 19 }}>Nouveau comptable</div>
-          <button onClick={onClose} style={{ background: "none", border: "none" }}><X size={20} /></button>
+          <div style={{ fontWeight: 700, fontSize: 18 }}>❓ Aide</div>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer" }}>×</button>
         </div>
 
-        <div style={{ marginBottom: 10 }}>
-          <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4 }}>Nom</label>
-          <input
-            value={form.nom}
-            onChange={(e) => setForm({ ...form, nom: e.target.value })}
-            style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, background: "white" }}
-          />
+        <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 20, lineHeight: 1.5 }}>
+          Une question, un blocage ? Contacte directement le support, ou consulte le guide complet.
         </div>
 
-        <div style={{ marginBottom: 10 }}>
-          <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4 }}>Email de connexion</label>
-          <input
-            type="email"
-            value={form.email}
-            onChange={(e) => setForm({ ...form, email: e.target.value })}
-            placeholder="pour lui donner accès à la comptabilité"
-            style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, background: "white" }}
-          />
-          <div style={{ fontSize: 11, color: "#8A9089", marginTop: 4 }}>
-            Crée-lui d'abord un compte via "Inviter", avec ce même email.
+        <div style={{ background: "#EAF3DE", border: "1px solid #C7DDA3", borderRadius: 14, padding: 20, marginBottom: 16, textAlign: "center" }}>
+          <div style={{ fontWeight: 700, fontSize: 14.5, color: "#3B6D11", marginBottom: 14 }}>
+            📲 Contacter le support sur WhatsApp
           </div>
-        </div>
-
-        <div style={{ marginBottom: 10 }}>
-          <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4 }}>Téléphone (optionnel)</label>
-          <input
-            value={form.telephone}
-            onChange={(e) => setForm({ ...form, telephone: e.target.value })}
-            style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, background: "white" }}
+          <img
+            src={lienQrCode}
+            alt="QR Code WhatsApp"
+            style={{ width: 160, height: 160, borderRadius: 10, border: "1px solid #C7DDA3", marginBottom: 14 }}
           />
+          <div style={{ fontSize: 11.5, color: "#3B6D11", marginBottom: 14 }}>
+            Scanne ce code, ou clique sur le bouton ci-dessous
+          </div>
+          <a
+            href={lienWhatsapp}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ display: "block", background: "#1a7a3c", color: "white", border: "none", borderRadius: 10, padding: "13px 0", fontWeight: 700, fontSize: 14, textDecoration: "none" }}
+          >
+            💬 Ouvrir WhatsApp
+          </a>
         </div>
 
-        <button
-          disabled={!canSubmit}
-          onClick={() => canSubmit && onAdd(form)}
-          style={{ width: "100%", marginTop: 6, padding: "13px 0", borderRadius: 10, border: "none", background: canSubmit ? "#1a7a3c" : "#DDD8CC", color: "white", fontWeight: 600, fontSize: 14.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+        <a
+          href={lienGuidePdf}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", background: "white", border: "1px solid #DDD8CC", color: "#16231F", borderRadius: 10, padding: "13px 0", fontWeight: 600, fontSize: 13.5, textDecoration: "none", boxSizing: "border-box" }}
         >
-          <Check size={17} /> Ajouter le comptable
-        </button>
+          📄 Télécharger le guide complet (PDF)
+        </a>
+        <div style={{ fontSize: 11, color: "#8A9089", marginTop: 8, textAlign: "center" }}>
+          Toutes les fonctionnalités expliquées en détail — équipe, comptabilité, boutique.
+        </div>
       </div>
     </div>
   );
 }
 
-function ComptablePortal({ comptable, orders, livreurs }) {
-  const [datePreset, setDatePreset] = useState("aujourdhui");
-  const [customStart, setCustomStart] = useState("");
-  const [customEnd, setCustomEnd] = useState("");
+function IntegrationsModal({ workspace, onClose }) {
+  const [copie, setCopie] = useState(false);
+  const [personnalisation, setPersonnalisation] = useState({
+    logo_url: workspace.logo_url || "",
+    banniere_url: workspace.banniere_url || "",
+    couleur_marque: workspace.couleur_marque || "#1a7a3c",
+    description_boutique: workspace.description_boutique || "",
+    politique_livraison: workspace.politique_livraison || "",
+    politique_retours: workspace.politique_retours || "",
+    politique_confidentialite: workspace.politique_confidentialite || "",
+    facebook_url: workspace.facebook_url || "",
+    instagram_url: workspace.instagram_url || "",
+    tiktok_url: workspace.tiktok_url || "",
+  });
+  const [envoiEnCoursType, setEnvoiEnCoursType] = useState(null);
+  const [pixelId, setPixelId] = useState(workspace.facebook_pixel_id || "");
+  const [savingPolitiqueLivraison, setSavingPolitiqueLivraison] = useState(false);
+  const [savedPolitiqueLivraison, setSavedPolitiqueLivraison] = useState(false);
+  const [savingPolitiqueRetours, setSavingPolitiqueRetours] = useState(false);
+  const [savedPolitiqueRetours, setSavedPolitiqueRetours] = useState(false);
+  const [savingPolitiqueConfidentialite, setSavingPolitiqueConfidentialite] = useState(false);
+  const [savedPolitiqueConfidentialite, setSavedPolitiqueConfidentialite] = useState(false);
+  const [savingPixel, setSavingPixel] = useState(false);
+  const [pixelSaved, setPixelSaved] = useState(false);
+  const [capiToken, setCapiToken] = useState(workspace.facebook_capi_token || "");
+  const [savingCapiToken, setSavingCapiToken] = useState(false);
+  const [capiTokenSaved, setCapiTokenSaved] = useState(false);
 
-  const dateRange = useMemo(() => {
-    const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    let start, end;
-    if (datePreset === "aujourdhui") {
-      start = startOfToday;
-      end = new Date(startOfToday.getTime() + 86400000);
-    } else if (datePreset === "hier") {
-      start = new Date(startOfToday.getTime() - 86400000);
-      end = startOfToday;
-    } else if (datePreset === "semaine") {
-      const day = startOfToday.getDay();
-      const diff = day === 0 ? 6 : day - 1;
-      start = new Date(startOfToday.getTime() - diff * 86400000);
-      end = new Date(now.getTime() + 60000);
-    } else if (datePreset === "mois") {
-      start = new Date(now.getFullYear(), now.getMonth(), 1);
-      end = new Date(now.getTime() + 60000);
-    } else if (datePreset === "personnalise" && customStart && customEnd) {
-      start = new Date(customStart + "T00:00:00");
-      end = new Date(customEnd + "T23:59:59");
-    } else {
-      start = new Date(0);
-      end = new Date(now.getTime() + 60000);
+  async function sauvegarderPixel() {
+    setSavingPixel(true);
+    await supabase.from("workspaces").update({ facebook_pixel_id: pixelId.trim() || null }).eq("id", workspace.id);
+    setSavingPixel(false);
+    setPixelSaved(true);
+    setTimeout(() => setPixelSaved(false), 2000);
+  }
+
+  async function sauvegarderCapiToken() {
+    setSavingCapiToken(true);
+    await supabase.from("workspaces").update({ facebook_capi_token: capiToken.trim() || null }).eq("id", workspace.id);
+    setSavingCapiToken(false);
+    setCapiTokenSaved(true);
+    setTimeout(() => setCapiTokenSaved(false), 2000);
+  }
+
+  async function envoyerImage(type, fichier) {
+    if (!fichier) return;
+    if (fichier.size > 5 * 1024 * 1024) {
+      alert("L'image est trop lourde (max 5 Mo). Choisis une image plus légère.");
+      return;
     }
-    return { start, end };
-  }, [datePreset, customStart, customEnd]);
+    setEnvoiEnCoursType(type);
+    const extension = fichier.name.split(".").pop();
+    const chemin = `${workspace.id}-${type}-${Date.now()}.${extension}`;
+    const { error: erreurUpload } = await supabase.storage.from("boutique").upload(chemin, fichier, { upsert: true });
+    if (erreurUpload) {
+      alert("Erreur lors de l'envoi : " + erreurUpload.message);
+      setEnvoiEnCoursType(null);
+      return;
+    }
+    const { data } = supabase.storage.from("boutique").getPublicUrl(chemin);
+    const champ = type === "logo" ? "logo_url" : "banniere_url";
+    await supabase.from("workspaces").update({ [champ]: data.publicUrl }).eq("id", workspace.id);
+    setPersonnalisation((p) => ({ ...p, [champ]: data.publicUrl }));
+    setEnvoiEnCoursType(null);
+  }
 
-  const ordersInRange = useMemo(() => {
-    return orders.filter((o) => {
-      const d = new Date(o.created_at);
-      return d >= dateRange.start && d < dateRange.end;
-    });
-  }, [orders, dateRange]);
+  async function sauvegarderCouleur(couleur) {
+    setPersonnalisation((p) => ({ ...p, couleur_marque: couleur }));
+    await supabase.from("workspaces").update({ couleur_marque: couleur }).eq("id", workspace.id);
+  }
 
-  const COUT_LIVRAISON = 1500;
+  async function sauvegarderDescription() {
+    await supabase.from("workspaces").update({ description_boutique: personnalisation.description_boutique }).eq("id", workspace.id);
+  }
 
-  const stats = useMemo(() => {
-    const confirmees = ordersInRange.filter((o) => o.statut === "confirmee");
-    const echouees = ordersInRange.filter((o) => o.statut === "echouee");
-    const enCours = ordersInRange.filter((o) => o.statut === "en_cours");
-    const chiffreAffaires = ordersInRange.reduce((s, o) => s + Number(o.montant) + Number(o.frais_expedition || 0), 0);
-    const montantConfirme = confirmees.reduce((s, o) => s + Number(o.montant) + Number(o.frais_expedition || 0), 0);
-    const coutLivraisons = confirmees.length * COUT_LIVRAISON;
-    const beneficeReel = montantConfirme - coutLivraisons;
-    return { total: ordersInRange.length, confirmees: confirmees.length, echouees: echouees.length, enCours: enCours.length, chiffreAffaires, montantConfirme, coutLivraisons, beneficeReel };
-  }, [ordersInRange]);
+  const [copieCommande, setCopieCommande] = useState(false);
+  const [copieCatalogue, setCopieCatalogue] = useState(false);
+  const [whatsappNumber, setWhatsappNumber] = useState(workspace.whatsapp_number || "");
+  const [savingWhatsapp, setSavingWhatsapp] = useState(false);
+  const [whatsappSaved, setWhatsappSaved] = useState(false);
+  const webhookUrl = `${window.location.origin}/api/shopify-webhook?secret=${workspace.webhook_secret}`;
+  const lienCommande = `${window.location.origin}/?commander=${workspace.id}`;
+  const lienCatalogue = `${window.location.origin}/?catalogue=${workspace.id}`;
 
-  const livreursStats = useMemo(() => {
-    return livreurs
-      .map((l) => {
-        const mesCommandes = ordersInRange.filter((o) => o.livreur === l.nom);
-        const livrees = mesCommandes.filter((o) => o.statut === "confirmee");
-        const montantRecupere = livrees.reduce((s, o) => s + Number(o.montant), 0);
-        const montantDu = livrees.length * COUT_LIVRAISON;
-        const montantADeposer = montantRecupere - montantDu;
-        return { ...l, total: mesCommandes.length, livrees: livrees.length, montantRecupere, montantDu, montantADeposer };
-      })
-      .filter((l) => l.total > 0)
-      .sort((a, b) => b.total - a.total);
-  }, [livreurs, ordersInRange]);
+  function copier() {
+    navigator.clipboard.writeText(webhookUrl);
+    setCopie(true);
+    setTimeout(() => setCopie(false), 2000);
+  }
 
-  const produitsCA = useMemo(() => {
-    const map = {};
-    ordersInRange.forEach((o) => {
-      const { nom, quantite } = parseProduitTexte(o.produit);
-      if (!nom) return;
-      if (!map[nom]) map[nom] = { nom, commandes: 0, pieces: 0, ca: 0, caConfirme: 0, livrees: 0 };
-      map[nom].commandes += 1;
-      map[nom].pieces += quantite;
-      map[nom].ca += Number(o.montant);
-      if (o.statut === "confirmee") {
-        map[nom].caConfirme += Number(o.montant);
-        map[nom].livrees += 1;
-      }
-    });
-    return Object.values(map).sort((a, b) => b.ca - a.ca);
-  }, [ordersInRange]);
+  function copierLienCommande() {
+    navigator.clipboard.writeText(lienCommande);
+    setCopieCommande(true);
+    setTimeout(() => setCopieCommande(false), 2000);
+  }
 
-  const totalPieces = produitsCA.reduce((s, p) => s + p.pieces, 0);
-  const totalCommandesProduits = produitsCA.reduce((s, p) => s + p.commandes, 0);
-  const totalCAProduits = produitsCA.reduce((s, p) => s + p.ca, 0);
+  function copierLienCatalogue() {
+    navigator.clipboard.writeText(lienCatalogue);
+    setCopieCatalogue(true);
+    setTimeout(() => setCopieCatalogue(false), 2000);
+  }
 
-  const produitsParLivreur = useMemo(() => {
-    const result = {};
-    livreurs.forEach((l) => {
-      const mesCommandes = ordersInRange.filter((o) => o.livreur === l.nom);
-      const map = {};
-      mesCommandes.forEach((o) => {
-        const { nom, quantite } = parseProduitTexte(o.produit);
-        if (!nom) return;
-        if (!map[nom]) map[nom] = { nom, pieces: 0, ca: 0 };
-        if (o.statut === "confirmee") {
-          map[nom].pieces += quantite;
-          map[nom].ca += Number(o.montant);
-        }
-      });
-      result[l.nom] = Object.values(map).sort((a, b) => b.ca - a.ca);
-    });
-    return result;
-  }, [livreurs, ordersInRange]);
-
-  const totalDu = livreursStats.reduce((s, l) => s + l.montantDu, 0);
-  const totalADeposer = livreursStats.reduce((s, l) => s + l.montantADeposer, 0);
+  async function sauvegarderWhatsapp() {
+    setSavingWhatsapp(true);
+    await supabase.from("workspaces").update({ whatsapp_number: whatsappNumber.trim() }).eq("id", workspace.id);
+    setSavingWhatsapp(false);
+    setWhatsappSaved(true);
+    setTimeout(() => setWhatsappSaved(false), 2000);
+  }
 
   return (
-    <div style={{ background: "#FAFAF7", minHeight: "100vh", fontFamily: "'IBM Plex Sans', sans-serif", color: "#16231F", paddingBottom: 30 }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');
-        @media print {
-          .rv-no-print { display: none !important; }
-          .rv-print-only { display: block !important; }
-          body, .rv-app { background: white !important; }
-          * { box-shadow: none !important; }
-        }
-      `}</style>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "white", borderRadius: 16, padding: 24, width: "100%", maxWidth: 440, maxHeight: "85vh", overflowY: "auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={{ fontWeight: 700, fontSize: 18 }}>🛍️ Ma Boutique</div>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer" }}>×</button>
+        </div>
 
-      <div className="rv-no-print" style={{ background: "#16231F", color: "white", padding: "22px 20px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 16 }}>
-          <div style={{ width: 26, height: 26, borderRadius: 7, background: "rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>
-            🧮
+        <a
+          href={lienCatalogue}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", background: "linear-gradient(135deg, #1a7a3c, #1F9D6E)", color: "white", border: "none", borderRadius: 12, padding: "14px 0", fontWeight: 700, fontSize: 14.5, textDecoration: "none", marginBottom: 20, boxSizing: "border-box" }}
+        >
+          👁️ Voir ma boutique en ligne
+        </a>
+
+        <div style={{ background: "#EAF3DE", border: "1px solid #C7DDA3", borderRadius: 12, padding: 16, marginBottom: 20 }}>
+          <div style={{ fontWeight: 700, fontSize: 14.5, color: "#3B6D11", marginBottom: 4 }}>
+            📲 Tu vends via WhatsApp, sans boutique en ligne ?
           </div>
-          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 17 }}>
-            RECU<span style={{ color: "#e8920a" }}>VENTE</span> — Comptabilité
+          <div style={{ fontSize: 12.5, color: "#3B6D11", marginBottom: 12, lineHeight: 1.5 }}>
+            Partage ce lien à tes clients sur WhatsApp — ils remplissent eux-mêmes leur commande, tu n'as plus rien à taper.
+          </div>
+          <div style={{ background: "white", border: "1px solid #C7DDA3", borderRadius: 8, padding: "10px 12px", fontSize: 11.5, fontFamily: "monospace", wordBreak: "break-all", marginBottom: 10 }}>
+            {lienCommande}
           </div>
           <button
-            onClick={() => window.print()}
-            style={{ marginLeft: "auto", background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: "6px 10px", borderRadius: 7, fontSize: 12, fontWeight: 500 }}
+            onClick={copierLienCommande}
+            style={{ width: "100%", background: copieCommande ? "#1F9D6E" : "#1a7a3c", color: "white", border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, fontSize: 13, cursor: "pointer" }}
           >
-            🖨️
+            {copieCommande ? "✅ Copié !" : "📋 Copier mon lien de commande"}
           </button>
+        </div>
+
+        <div style={{ background: "#EAF3DE", border: "1px solid #C7DDA3", borderRadius: 12, padding: 16, marginBottom: 20 }}>
+          <div style={{ fontWeight: 700, fontSize: 14.5, color: "#3B6D11", marginBottom: 4 }}>
+            🛍️ Ta mini-boutique en ligne
+          </div>
+          <div style={{ fontSize: 12.5, color: "#3B6D11", marginBottom: 12, lineHeight: 1.5 }}>
+            Une page avec tes produits, prix et photos — mets-la en bio Facebook/WhatsApp. Un clic sur un produit ouvre WhatsApp avec un message déjà rempli.
+          </div>
+
+          <div style={{ fontSize: 11.5, color: "#3B6D11", marginBottom: 4 }}>Ton numéro WhatsApp (pour recevoir les commandes)</div>
+          <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+            <input
+              value={whatsappNumber}
+              onChange={(e) => setWhatsappNumber(e.target.value)}
+              placeholder="Ex: 07 00 00 00 00"
+              style={{ flex: 1, padding: "9px 10px", borderRadius: 8, border: "1px solid #C7DDA3", fontSize: 13 }}
+            />
+            <button
+              onClick={sauvegarderWhatsapp}
+              disabled={savingWhatsapp}
+              style={{ background: whatsappSaved ? "#1F9D6E" : "#3B6D11", color: "white", border: "none", borderRadius: 8, padding: "0 14px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}
+            >
+              {whatsappSaved ? "✅" : savingWhatsapp ? "..." : "Enregistrer"}
+            </button>
+          </div>
+
+          <div style={{ background: "white", border: "1px solid #C7DDA3", borderRadius: 8, padding: "10px 12px", fontSize: 11.5, fontFamily: "monospace", wordBreak: "break-all", marginBottom: 10 }}>
+            {lienCatalogue}
+          </div>
           <button
-            onClick={() => supabase.auth.signOut()}
-            style={{ background: "rgba(255,255,255,0.14)", border: "none", color: "white", padding: "6px 12px", borderRadius: 7, fontSize: 12, fontWeight: 500 }}
+            onClick={copierLienCatalogue}
+            disabled={!workspace.whatsapp_number && !whatsappSaved}
+            style={{ width: "100%", background: copieCatalogue ? "#1F9D6E" : "#1a7a3c", color: "white", border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, fontSize: 13, cursor: "pointer", opacity: (!workspace.whatsapp_number && !whatsappSaved) ? 0.5 : 1 }}
           >
-            Déconnexion
+            {copieCatalogue ? "✅ Copié !" : "📋 Copier le lien de ma boutique"}
           </button>
+          {(!workspace.whatsapp_number && !whatsappSaved) && (
+            <div style={{ fontSize: 11, color: "#3B6D11", marginTop: 6 }}>Enregistre ton numéro WhatsApp d'abord ⬆️</div>
+          )}
         </div>
-        <div style={{ fontSize: 13, opacity: 0.7 }}>Bonjour {comptable.nom}</div>
-      </div>
 
-      <div className="rv-print-only" style={{ display: "none", padding: "20px 20px 0" }}>
-        <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 20 }}>Rapport comptable — RecuVente</div>
-        <div style={{ fontSize: 12, color: "#6B7168" }}>Édité le {new Date().toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })} — {periodLabelFromPreset(datePreset)}</div>
-      </div>
-
-      <div className="rv-no-print" style={{ margin: "16px 20px 0", display: "flex", gap: 7, overflowX: "auto" }}>
-        {[
-          { key: "aujourdhui", label: "Aujourd'hui" },
-          { key: "hier", label: "Hier" },
-          { key: "avanthier", label: "Avant-hier" },
-          { key: "semaine", label: "Cette semaine" },
-          { key: "mois", label: "Ce mois" },
-          { key: "personnalise", label: "Personnalisé" },
-        ].map((d) => (
-          <button
-            key={d.key}
-            onClick={() => setDatePreset(d.key)}
-            style={{
-              padding: "6px 13px",
-              borderRadius: 999,
-              border: "1px solid " + (datePreset === d.key ? "#1a7a3c" : "#DDD8CC"),
-              background: datePreset === d.key ? "#1a7a3c" : "white",
-              color: datePreset === d.key ? "white" : "#16231F",
-              fontSize: 12.5,
-              fontWeight: 500,
-              whiteSpace: "nowrap",
-              flexShrink: 0,
-            }}
-          >
-            {d.label}
-          </button>
-        ))}
-      </div>
-
-      {datePreset === "personnalise" && (
-        <div className="rv-no-print" style={{ margin: "8px 20px 0", display: "flex", gap: 8, alignItems: "center" }}>
-          <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 13 }} />
-          <span style={{ color: "#8A9089", fontSize: 12 }}>à</span>
-          <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 13 }} />
-        </div>
-      )}
-
-      <div style={{ margin: "16px 20px 0", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "12px 14px" }}>
-          <div style={{ fontSize: 11, color: "#8A9089", textTransform: "uppercase" }}>Chiffre d'affaires</div>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 18, marginTop: 3 }}>{formatFCFA(stats.chiffreAffaires)}</div>
-        </div>
-        <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "12px 14px" }}>
-          <div style={{ fontSize: 11, color: "#8A9089", textTransform: "uppercase" }}>Commandes</div>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 18, marginTop: 3 }}>{stats.total}</div>
-        </div>
-      </div>
-
-      <div style={{ margin: "10px 20px 0" }}>
-        <div style={{ background: "linear-gradient(135deg, #16231F, #1e2f28)", borderRadius: 14, padding: "16px 18px" }}>
-          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.65)", textTransform: "uppercase" }}>💰 Bénéfice réel</div>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 24, color: stats.beneficeReel >= 0 ? "#7fd6a3" : "#f0a0a0", marginTop: 3 }}>
-            {formatFCFA(stats.beneficeReel)}
+        <div style={{ background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 12, padding: 16, marginBottom: 20 }}>
+          <div style={{ fontWeight: 700, fontSize: 14.5, color: "#8A6412", marginBottom: 4 }}>
+            🎨 Personnalise ta boutique
           </div>
-          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", marginTop: 4 }}>
-            CA confirmé {formatFCFA(stats.montantConfirme)} − Livraisons ({stats.confirmees} × {formatFCFA(COUT_LIVRAISON)})
+          <div style={{ fontSize: 12.5, color: "#8A6412", marginBottom: 14, lineHeight: 1.5 }}>
+            Logo, bannière et couleur — pour que ta boutique publique te ressemble vraiment.
           </div>
-        </div>
-      </div>
 
-      <div style={{ margin: "16px 20px 0", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        <div style={{ background: "linear-gradient(135deg, #16231F, #1e2f28)", borderRadius: 14, padding: "14px 16px" }}>
-          <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.65)", textTransform: "uppercase" }}>💵 À payer aux livreurs</div>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 19, color: "#e8920a", marginTop: 3 }}>{formatFCFA(totalDu)}</div>
-        </div>
-        <div style={{ background: "linear-gradient(135deg, #1a7a3c, #1F9D6E)", borderRadius: 14, padding: "14px 16px" }}>
-          <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.75)", textTransform: "uppercase" }}>🏦 Dépôt attendu</div>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 19, color: "white", marginTop: 3 }}>{formatFCFA(totalADeposer)}</div>
-        </div>
-      </div>
+          <div style={{ fontSize: 11.5, color: "#8A6412", marginBottom: 4 }}>Logo</div>
+          {personnalisation.logo_url && (
+            <img src={personnalisation.logo_url} alt="Logo" style={{ width: 56, height: 56, borderRadius: 10, objectFit: "cover", marginBottom: 8, border: "1px solid #F0DDA8" }} />
+          )}
+          <label style={{ display: "inline-block", background: "white", border: "1px solid #F0DDA8", borderRadius: 8, padding: "8px 14px", fontSize: 12, fontWeight: 600, color: "#8A6412", cursor: "pointer", marginBottom: 14 }}>
+            {envoiEnCoursType === "logo" ? "Envoi..." : personnalisation.logo_url ? "Changer le logo" : "Ajouter un logo"}
+            <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => envoyerImage("logo", e.target.files?.[0])} />
+          </label>
 
-      <div style={{ padding: "20px 20px 0" }}>
-        <ResumeMultiPeriodes orders={orders} livreurs={livreurs} />
+          <div style={{ fontSize: 11.5, color: "#8A6412", marginBottom: 4 }}>Bannière (image large en haut de la boutique)</div>
+          {personnalisation.banniere_url && (
+            <img src={personnalisation.banniere_url} alt="Bannière" style={{ width: "100%", height: 70, borderRadius: 10, objectFit: "cover", marginBottom: 8, border: "1px solid #F0DDA8" }} />
+          )}
+          <label style={{ display: "inline-block", background: "white", border: "1px solid #F0DDA8", borderRadius: 8, padding: "8px 14px", fontSize: 12, fontWeight: 600, color: "#8A6412", cursor: "pointer", marginBottom: 14 }}>
+            {envoiEnCoursType === "banniere" ? "Envoi..." : personnalisation.banniere_url ? "Changer la bannière" : "Ajouter une bannière"}
+            <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => envoyerImage("banniere", e.target.files?.[0])} />
+          </label>
 
-        {produitsCA.length > 0 && (
-          <div style={{ marginBottom: 24 }}>
-            <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>
-              💵 Chiffre d'affaires par produit ({periodLabelFromPreset(datePreset)})
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {produitsCA.map((p) => (
-                <div key={p.nom} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 10, padding: "10px 14px" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span style={{ fontSize: 13, fontWeight: 600 }}>{p.nom}</span>
-                    <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 14, color: "#1a7a3c" }}>{formatFCFA(p.ca)}</span>
-                  </div>
-                  <div style={{ fontSize: 11.5, color: "#6B7168", marginTop: 3 }}>
-                    {p.commandes} commande{p.commandes > 1 ? "s" : ""} ({p.pieces} pièce{p.pieces > 1 ? "s" : ""}) · {p.livrees} livrée{p.livrees > 1 ? "s" : ""} · dont {formatFCFA(p.caConfirme)} confirmé
-                  </div>
-                </div>
-              ))}
-              <div style={{ background: "#16231F", borderRadius: 10, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
-                <span style={{ fontSize: 13, fontWeight: 700, color: "white" }}>Total — {totalCommandesProduits} commande{totalCommandesProduits > 1 ? "s" : ""} ({totalPieces} pièce{totalPieces > 1 ? "s" : ""})</span>
-                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 15, color: "#e8920a" }}>{formatFCFA(totalCAProduits)}</span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>📊 Résumé — commandes reçues par livreur ({periodLabelFromPreset(datePreset)})</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 20 }}>
-          {livreursStats.map((l) => (
-            <div key={l.id + "-resume"} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 8, padding: "9px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: 13 }}><strong>{l.nom}</strong> a reçu</span>
-              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 14, color: "#1a7a3c" }}>{l.total} commande{l.total > 1 ? "s" : ""}</span>
-            </div>
-          ))}
-        </div>
-
-        <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>Détail par livreur ({periodLabelFromPreset(datePreset)})</div>
-        {livreursStats.length === 0 && (
-          <div style={{ textAlign: "center", padding: "30px 0", color: "#8A9089", fontSize: 14 }}>Aucune livraison sur cette période.</div>
-        )}
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {livreursStats.map((l) => (
-            <LivreurDetailComptable key={l.id} l={l} produits={produitsParLivreur[l.nom] || []} />
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function LivreurDetailComptable({ l, produits }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "14px 16px" }}>
-      <div onClick={() => setOpen(!open)} style={{ cursor: "pointer" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ fontWeight: 600, fontSize: 15 }}>{l.nom}</div>
-          <span style={{ fontSize: 11.5, color: "#1a7a3c", fontWeight: 600 }}>{open ? "Fermer ▲" : "Voir le détail ▼"}</span>
-        </div>
-        <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{l.livrees} livraison{l.livrees > 1 ? "s" : ""} · {formatFCFA(l.montantRecupere)} encaissé</div>
-      </div>
-      <div style={{ marginTop: 8, background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 8, padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span style={{ fontSize: 12, color: "#8A6412", fontWeight: 600 }}>💵 Sa commission</span>
-        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 14, color: "#8A6412" }}>{formatFCFA(l.montantDu)}</span>
-      </div>
-      <div style={{ marginTop: 6, background: "#EAF3DE", border: "1px solid #C7DDA3", borderRadius: 8, padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span style={{ fontSize: 12, color: "#3B6D11", fontWeight: 600 }}>🏦 Doit déposer</span>
-        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 14, color: "#3B6D11" }}>{formatFCFA(l.montantADeposer)}</span>
-      </div>
-
-      {open && (
-        <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #F0EEE6" }}>
-          <div style={{ fontSize: 11, color: "#8A9089", textTransform: "uppercase", marginBottom: 6 }}>CA par produit</div>
-          {produits.length === 0 && <div style={{ fontSize: 12.5, color: "#8A9089" }}>Aucune vente confirmée sur cette période.</div>}
-          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-            {produits.map((p) => (
-              <div key={p.nom} style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}>
-                <span style={{ color: "#6B7168" }}>{p.nom} <span style={{ color: "#8A9089" }}>({p.pieces} pc)</span></span>
-                <span style={{ fontWeight: 600 }}>{formatFCFA(p.ca)}</span>
-              </div>
+          <div style={{ fontSize: 11.5, color: "#8A6412", marginBottom: 4 }}>Couleur de ta marque</div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+            {["#1a7a3c", "#e8920a", "#D64933", "#2452E8", "#8A2BE2", "#16231F"].map((coul) => (
+              <button
+                key={coul}
+                onClick={() => sauvegarderCouleur(coul)}
+                style={{ width: 30, height: 30, borderRadius: "50%", background: coul, border: personnalisation.couleur_marque === coul ? "3px solid #16231F" : "1px solid #DDD8CC", cursor: "pointer" }}
+              />
             ))}
           </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
-function ComptaDetailModal({ stats, livreursStats, coutLivraison, periodLabel, orders, livreurs, repartitionCloserLivreur, onClose }) {
-  const actifs = livreursStats.filter((l) => l.livrees > 0);
-  const livreursAvecCommandes = livreursStats.filter((l) => l.total > 0).sort((a, b) => b.total - a.total);
-  const totalDu = actifs.reduce((s, l) => s + (l.montantDu || 0), 0);
-  const totalADeposer = actifs.reduce((s, l) => s + (l.montantRecupere - (l.montantDu || 0)), 0);
-  const [ligneOuverte, setLigneOuverte] = useState(null);
-
-  return (
-    <div className="rv-modal-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.6)", display: "flex", alignItems: "flex-end", zIndex: 55 }} onClick={onClose}>
-      <div className="rv-modal-sheet" onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", maxHeight: "85vh", overflowY: "auto", borderRadius: "18px 18px 0 0", padding: "18px 20px 28px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 19 }}>Comptabilité détaillée</div>
-          <button onClick={onClose} style={{ background: "none", border: "none" }}><X size={20} /></button>
-        </div>
-        {periodLabel && (
-          <div style={{ display: "inline-block", fontSize: 11, fontWeight: 600, color: "#1a7a3c", background: "#EAF3DE", padding: "3px 10px", borderRadius: 999, marginBottom: 16 }}>
-            📊 {periodLabel}
-          </div>
-        )}
-
-        <div style={{ background: "linear-gradient(135deg, #16231F, #1e2f28)", borderRadius: 14, padding: "16px 18px", marginBottom: 12 }}>
-          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.65)", textTransform: "uppercase" }}>💰 Bénéfice réel</div>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 24, color: stats.beneficeReel >= 0 ? "#7fd6a3" : "#f0a0a0", marginTop: 3 }}>
-            {formatFCFA(stats.beneficeReel)}
-          </div>
+          <div style={{ fontSize: 11.5, color: "#8A6412", marginBottom: 4 }}>Description courte (optionnel)</div>
+          <textarea
+            value={personnalisation.description_boutique || ""}
+            onChange={(e) => setPersonnalisation({ ...personnalisation, description_boutique: e.target.value })}
+            onBlur={sauvegarderDescription}
+            placeholder="Ex: Vêtements et accessoires de qualité, livraison rapide à Abidjan"
+            rows={2}
+            style={{ width: "100%", padding: "9px 11px", borderRadius: 8, border: "1px solid #F0DDA8", fontSize: 13, boxSizing: "border-box", fontFamily: "inherit" }}
+          />
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
-          <div style={{ background: "linear-gradient(135deg, #16231F, #1e2f28)", borderRadius: 14, padding: "14px 16px" }}>
-            <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.65)", textTransform: "uppercase" }}>💵 À payer aux livreurs</div>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 19, color: "#e8920a", marginTop: 3 }}>{formatFCFA(totalDu)}</div>
+        <div style={{ background: "#FAFAF7", border: "1px solid #ECE8DC", borderRadius: 12, padding: 16, marginBottom: 20 }}>
+          <div style={{ fontWeight: 700, fontSize: 14.5, marginBottom: 4 }}>
+            📄 Politiques de ta boutique
           </div>
-          <div style={{ background: "linear-gradient(135deg, #1a7a3c, #1F9D6E)", borderRadius: 14, padding: "14px 16px" }}>
-            <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.75)", textTransform: "uppercase" }}>🏦 Dépôt attendu</div>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 19, color: "white", marginTop: 3 }}>{formatFCFA(totalADeposer)}</div>
+          <div style={{ fontSize: 12.5, color: "#6B7168", marginBottom: 14, lineHeight: 1.5 }}>
+            Elles apparaîtront dans le pied de page de ta boutique publique, pour rassurer tes clients.
+          </div>
+
+          <div style={{ fontSize: 11.5, color: "#6B7168", marginBottom: 4 }}>Politique de livraison</div>
+          <textarea
+            value={personnalisation.politique_livraison || ""}
+            onChange={(e) => setPersonnalisation({ ...personnalisation, politique_livraison: e.target.value })}
+            placeholder="Ex: Livraison en 24-48h à Abidjan, paiement à la réception."
+            rows={3}
+            style={{ width: "100%", padding: "9px 11px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 13, boxSizing: "border-box", fontFamily: "inherit", marginBottom: 6 }}
+          />
+          <button
+            onClick={async () => {
+              setSavingPolitiqueLivraison(true);
+              await supabase.from("workspaces").update({ politique_livraison: personnalisation.politique_livraison }).eq("id", workspace.id);
+              setSavingPolitiqueLivraison(false);
+              setSavedPolitiqueLivraison(true);
+              setTimeout(() => setSavedPolitiqueLivraison(false), 2000);
+            }}
+            disabled={savingPolitiqueLivraison}
+            style={{ background: savedPolitiqueLivraison ? "#1F9D6E" : "#1a7a3c", color: "white", border: "none", borderRadius: 7, padding: "7px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer", marginBottom: 16 }}
+          >
+            {savedPolitiqueLivraison ? "✅ Enregistré" : savingPolitiqueLivraison ? "..." : "Enregistrer"}
+          </button>
+
+          <div style={{ fontSize: 11.5, color: "#6B7168", marginBottom: 4 }}>Politique de retours</div>
+          <textarea
+            value={personnalisation.politique_retours || ""}
+            onChange={(e) => setPersonnalisation({ ...personnalisation, politique_retours: e.target.value })}
+            placeholder="Ex: Retour possible sous 48h si le produit est défectueux."
+            rows={3}
+            style={{ width: "100%", padding: "9px 11px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 13, boxSizing: "border-box", fontFamily: "inherit", marginBottom: 6 }}
+          />
+          <button
+            onClick={async () => {
+              setSavingPolitiqueRetours(true);
+              await supabase.from("workspaces").update({ politique_retours: personnalisation.politique_retours }).eq("id", workspace.id);
+              setSavingPolitiqueRetours(false);
+              setSavedPolitiqueRetours(true);
+              setTimeout(() => setSavedPolitiqueRetours(false), 2000);
+            }}
+            disabled={savingPolitiqueRetours}
+            style={{ background: savedPolitiqueRetours ? "#1F9D6E" : "#1a7a3c", color: "white", border: "none", borderRadius: 7, padding: "7px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer", marginBottom: 16 }}
+          >
+            {savedPolitiqueRetours ? "✅ Enregistré" : savingPolitiqueRetours ? "..." : "Enregistrer"}
+          </button>
+
+          <div style={{ fontSize: 11.5, color: "#6B7168", marginBottom: 4 }}>Politique de confidentialité</div>
+          <textarea
+            value={personnalisation.politique_confidentialite || ""}
+            onChange={(e) => setPersonnalisation({ ...personnalisation, politique_confidentialite: e.target.value })}
+            placeholder="Ex: Tes informations ne sont utilisées que pour te livrer, jamais partagées."
+            rows={3}
+            style={{ width: "100%", padding: "9px 11px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 13, boxSizing: "border-box", fontFamily: "inherit", marginBottom: 6 }}
+          />
+          <button
+            onClick={async () => {
+              setSavingPolitiqueConfidentialite(true);
+              await supabase.from("workspaces").update({ politique_confidentialite: personnalisation.politique_confidentialite }).eq("id", workspace.id);
+              setSavingPolitiqueConfidentialite(false);
+              setSavedPolitiqueConfidentialite(true);
+              setTimeout(() => setSavedPolitiqueConfidentialite(false), 2000);
+            }}
+            disabled={savingPolitiqueConfidentialite}
+            style={{ background: savedPolitiqueConfidentialite ? "#1F9D6E" : "#1a7a3c", color: "white", border: "none", borderRadius: 7, padding: "7px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+          >
+            {savedPolitiqueConfidentialite ? "✅ Enregistré" : savingPolitiqueConfidentialite ? "..." : "Enregistrer"}
+          </button>
+        </div>
+
+        <div style={{ background: "#EAF0FB", border: "1px solid #C3D4F0", borderRadius: 12, padding: 16, marginBottom: 20 }}>
+          <div style={{ fontWeight: 700, fontSize: 14.5, color: "#1E4B8C", marginBottom: 4 }}>
+            📊 Pixel Facebook — suis tes publicités
+          </div>
+          <div style={{ fontSize: 12.5, color: "#1E4B8C", marginBottom: 12, lineHeight: 1.5 }}>
+            Colle ton identifiant de Pixel Facebook pour voir combien de ventes viennent réellement de tes publicités.
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <input
+              value={pixelId}
+              onChange={(e) => setPixelId(e.target.value)}
+              placeholder="Ex: 1761789765001953"
+              style={{ flex: 1, padding: "9px 10px", borderRadius: 8, border: "1px solid #C3D4F0", fontSize: 13 }}
+            />
+            <button
+              onClick={sauvegarderPixel}
+              disabled={savingPixel}
+              style={{ background: pixelSaved ? "#1F9D6E" : "#1E4B8C", color: "white", border: "none", borderRadius: 8, padding: "0 14px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}
+            >
+              {pixelSaved ? "✅" : savingPixel ? "..." : "Enregistrer"}
+            </button>
+          </div>
+          <div style={{ fontSize: 11, color: "#1E4B8C", marginTop: 8, opacity: 0.8 }}>
+            Trouve-le sur business.facebook.com → Gestionnaire d'événements. Suit automatiquement : visite, vue produit, ajout panier, et achat.
+          </div>
+
+          <div style={{ height: 1, background: "#C3D4F0", margin: "14px 0" }} />
+
+          <div style={{ fontWeight: 700, fontSize: 13, color: "#1E4B8C", marginBottom: 4 }}>
+            🔒 Token Conversions API (recommandé, pour du COD)
+          </div>
+          <div style={{ fontSize: 12, color: "#1E4B8C", marginBottom: 10, lineHeight: 1.5 }}>
+            Permet d'envoyer le vrai signal "Achat" à Facebook uniquement quand une livraison est réellement confirmée — bien plus fiable que de suivre chaque simple commande.
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <input
+              value={capiToken}
+              onChange={(e) => setCapiToken(e.target.value)}
+              placeholder="Colle ton token ici"
+              type="password"
+              style={{ flex: 1, padding: "9px 10px", borderRadius: 8, border: "1px solid #C3D4F0", fontSize: 13 }}
+            />
+            <button
+              onClick={sauvegarderCapiToken}
+              disabled={savingCapiToken}
+              style={{ background: capiTokenSaved ? "#1F9D6E" : "#1E4B8C", color: "white", border: "none", borderRadius: 8, padding: "0 14px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}
+            >
+              {capiTokenSaved ? "✅" : savingCapiToken ? "..." : "Enregistrer"}
+            </button>
+          </div>
+          <div style={{ fontSize: 11, color: "#1E4B8C", marginTop: 8, opacity: 0.8 }}>
+            Trouve-le sur business.facebook.com → Gestionnaire d'événements → ton pixel → onglet "API Conversions" → "Générer un token d'accès".
           </div>
         </div>
 
-        <ResumeMultiPeriodes orders={orders} livreurs={livreurs} />
+        <div style={{ background: "#FAFAF7", border: "1px solid #ECE8DC", borderRadius: 12, padding: 16, marginBottom: 20 }}>
+          <div style={{ fontWeight: 700, fontSize: 14.5, marginBottom: 4 }}>
+            🔗 Réseaux sociaux
+          </div>
+          <div style={{ fontSize: 12.5, color: "#6B7168", marginBottom: 14, lineHeight: 1.5 }}>
+            Affichés dans le pied de page de ta boutique publique.
+          </div>
 
-        <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>Détail par livreur ({periodLabel})</div>
-        {actifs.length === 0 && (
-          <div style={{ textAlign: "center", padding: "20px 0", color: "#8A9089", fontSize: 13.5 }}>Aucune livraison sur cette période.</div>
-        )}
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {actifs.map((l) => (
-            <div key={l.id} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "12px 14px" }}>
-              <div style={{ fontWeight: 600, fontSize: 14 }}>{l.nom}</div>
-              <div style={{ fontSize: 12, color: "#6B7168", marginTop: 2 }}>{l.livrees} livraison{l.livrees > 1 ? "s" : ""} · {formatFCFA(l.montantRecupere)} encaissé</div>
-              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                <div style={{ flex: 1, background: "#FBF3E3", borderRadius: 7, padding: "6px 9px", fontSize: 11.5, color: "#8A6412" }}>
-                  Commission : <strong>{formatFCFA(l.montantDu)}</strong>
-                </div>
-                <div style={{ flex: 1, background: "#EAF3DE", borderRadius: 7, padding: "6px 9px", fontSize: 11.5, color: "#3B6D11" }}>
-                  À déposer : <strong>{formatFCFA(l.montantRecupere - l.montantDu)}</strong>
-                </div>
+          <div style={{ fontSize: 11.5, color: "#6B7168", marginBottom: 4 }}>Facebook</div>
+          <input
+            value={personnalisation.facebook_url || ""}
+            onChange={(e) => setPersonnalisation({ ...personnalisation, facebook_url: e.target.value })}
+            onBlur={() => supabase.from("workspaces").update({ facebook_url: personnalisation.facebook_url || null }).eq("id", workspace.id)}
+            placeholder="https://facebook.com/tapage"
+            style={{ ...inputStyle, marginBottom: 10 }}
+          />
+
+          <div style={{ fontSize: 11.5, color: "#6B7168", marginBottom: 4 }}>Instagram</div>
+          <input
+            value={personnalisation.instagram_url || ""}
+            onChange={(e) => setPersonnalisation({ ...personnalisation, instagram_url: e.target.value })}
+            onBlur={() => supabase.from("workspaces").update({ instagram_url: personnalisation.instagram_url || null }).eq("id", workspace.id)}
+            placeholder="https://instagram.com/toncompte"
+            style={{ ...inputStyle, marginBottom: 10 }}
+          />
+
+          <div style={{ fontSize: 11.5, color: "#6B7168", marginBottom: 4 }}>TikTok</div>
+          <input
+            value={personnalisation.tiktok_url || ""}
+            onChange={(e) => setPersonnalisation({ ...personnalisation, tiktok_url: e.target.value })}
+            onBlur={() => supabase.from("workspaces").update({ tiktok_url: personnalisation.tiktok_url || null }).eq("id", workspace.id)}
+            placeholder="https://tiktok.com/@toncompte"
+            style={{ ...inputStyle, marginBottom: 0 }}
+          />
+        </div>
+
+        <div style={{ fontSize: 13, color: "#6B7168", marginBottom: 16, lineHeight: 1.5 }}>
+          Connecte ta boutique Shopify pour que chaque nouvelle commande arrive **automatiquement** ici, sans rien taper à la main.
+        </div>
+
+        <div style={{ background: "#FAFAF7", border: "1px solid #ECE8DC", borderRadius: 12, padding: 16, marginBottom: 16 }}>
+          <div style={{ fontSize: 11, color: "#8A9089", textTransform: "uppercase", marginBottom: 8 }}>Ton lien unique — ne le partage à personne</div>
+          <div style={{ background: "white", border: "1px solid #DDD8CC", borderRadius: 8, padding: "10px 12px", fontSize: 11.5, fontFamily: "monospace", wordBreak: "break-all", marginBottom: 10 }}>
+            {webhookUrl}
+          </div>
+          <button
+            onClick={copier}
+            style={{ width: "100%", background: copie ? "#1F9D6E" : "#1a7a3c", color: "white", border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, fontSize: 13, cursor: "pointer" }}
+          >
+            {copie ? "✅ Copié !" : "📋 Copier le lien"}
+          </button>
+        </div>
+
+        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>Comment l'installer sur Shopify</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {[
+            { n: 1, texte: "Sur ta boutique Shopify, va dans Paramètres → Notifications" },
+            { n: 2, texte: "Descends jusqu'à \"Webhooks\", clique \"Créer un webhook\"" },
+            { n: 3, texte: "Événement : \"Création de commande\" (Order creation)" },
+            { n: 4, texte: "Format : JSON" },
+            { n: 5, texte: "URL : colle le lien copié ci-dessus" },
+            { n: 6, texte: "Enregistre — chaque nouvelle commande Shopify apparaîtra automatiquement dans RecuVente" },
+          ].map((etape) => (
+            <div key={etape.n} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+              <div style={{ width: 20, height: 20, borderRadius: "50%", background: "#EAF3DE", color: "#1a7a3c", fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                {etape.n}
               </div>
+              <div style={{ fontSize: 12.5, color: "#16231F", lineHeight: 1.4 }}>{etape.texte}</div>
             </div>
           ))}
         </div>
 
-        {livreursAvecCommandes.length > 0 && (
-          <div style={{ marginTop: 20 }}>
-            <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>
-              📊 Résumé — commandes reçues par livreur ({periodLabel})
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {livreursAvecCommandes.map((l) => (
-                <div key={l.id} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 8, padding: "9px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ fontSize: 13 }}><strong>{l.nom}</strong> a reçu</span>
-                  <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 14, color: "#1a7a3c" }}>{l.total} commande{l.total > 1 ? "s" : ""}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {repartitionCloserLivreur && repartitionCloserLivreur.length > 0 && (
-          <div style={{ marginTop: 20 }}>
-            <div style={{ fontSize: 12, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 10 }}>
-              🔄 Répartition Closer → Livreur ({periodLabel})
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {repartitionCloserLivreur.map((r, i) => {
-                const key = r.closer + "|||" + r.livreur;
-                const open = ligneOuverte === key;
-                return (
-                  <div key={i} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 10, padding: "10px 12px" }}>
-                    <button
-                      onClick={() => setLigneOuverte(open ? null : key)}
-                      style={{ width: "100%", background: "none", border: "none", display: "flex", justifyContent: "space-between", alignItems: "center", textAlign: "left" }}
-                    >
-                      <span style={{ fontSize: 12.5 }}>
-                        <strong>{r.closer}</strong> → <strong>{r.livreur}</strong>
-                      </span>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: "#1a7a3c" }}>{r.total} cmd {open ? "▲" : "▼"}</span>
-                    </button>
-                    {open && (
-                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #F0EEE6", display: "flex", flexDirection: "column", gap: 5 }}>
-                        {r.produitsListe.map((p) => (
-                          <div key={p.nom} style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5 }}>
-                            <span style={{ color: "#6B7168" }}>{p.nom}</span>
-                            <span style={{ fontWeight: 600 }}>{p.qte} pièce{p.qte > 1 ? "s" : ""}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function ProduitsModal({ produits, onDelete, onUpdateCout, onUpdateStock, quantitesParProduit, onAddClick, onClose }) {
-  const [editId, setEditId] = useState(null);
-  const [editValue, setEditValue] = useState("");
-  const [editStockId, setEditStockId] = useState(null);
-  const [editStockValue, setEditStockValue] = useState("");
-
-  function commencerEdition(p) {
-    setEditId(p.id);
-    setEditValue(String(p.cout_achat));
-  }
-
-  function validerEdition(id) {
-    onUpdateCout(id, editValue);
-    setEditId(null);
-  }
-
-  function commencerEditionStock(p) {
-    setEditStockId(p.id);
-    setEditStockValue(String(p.stock_initial || 0));
-  }
-
-  function validerEditionStock(id) {
-    onUpdateStock(id, editStockValue);
-    setEditStockId(null);
-  }
-
-  const totalStock = produits.reduce((s, p) => s + Number(p.stock_initial || 0), 0);
-  const totalVendu = produits.reduce((s, p) => s + (quantitesParProduit[p.nom]?.commandees || 0), 0);
-  const totalLivre = produits.reduce((s, p) => s + (quantitesParProduit[p.nom]?.livrees || 0), 0);
-
-  return (
-    <div className="rv-modal-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", zIndex: 50 }} onClick={onClose}>
-      <div className="rv-modal-sheet" onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", maxHeight: "85vh", overflowY: "auto", borderRadius: "18px 18px 0 0", padding: "18px 20px 28px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 19 }}>Catalogue & Stock</div>
-          <button onClick={onClose} style={{ background: "none", border: "none" }}><X size={20} /></button>
+        <div style={{ background: "#FBF3E3", border: "1px solid #F0DDA8", borderRadius: 10, padding: "10px 12px", marginTop: 16, fontSize: 12, color: "#8A6412" }}>
+          ⚠️ Ce lien est unique à ton entreprise — les commandes créées via ce lien arrivent uniquement dans ton espace, jamais chez une autre entreprise.
         </div>
-
-        <div style={{ fontSize: 12.5, color: "#6B7168", marginBottom: 14 }}>
-          Le nom doit correspondre exactement à celui utilisé dans tes commandes. Renseigne le stock acheté (Alibaba) pour suivre ce qu'il reste.
-        </div>
-
-        {produits.length > 0 && (
-          <div style={{ background: "#16231F", borderRadius: 12, padding: "12px 14px", marginBottom: 16, display: "flex", justifyContent: "space-around", textAlign: "center" }}>
-            <div>
-              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", textTransform: "uppercase" }}>En stock</div>
-              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 18, color: "white" }}>{totalStock}</div>
-            </div>
-            <div>
-              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", textTransform: "uppercase" }}>Engagé</div>
-              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 18, color: "#e8920a" }}>{totalVendu}</div>
-            </div>
-            <div>
-              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", textTransform: "uppercase" }}>Livré</div>
-              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 18, color: "#7fd6a3" }}>{totalLivre}</div>
-            </div>
-            <div>
-              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", textTransform: "uppercase" }}>Restant</div>
-              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 18, color: "white" }}>{totalStock - totalVendu}</div>
-            </div>
-          </div>
-        )}
-
-        <button
-          onClick={onAddClick}
-          style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none", background: "#1a7a3c", color: "white", fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginBottom: 16 }}
-        >
-          <Plus size={17} /> Ajouter un produit
-        </button>
-
-        {produits.length === 0 && (
-          <div style={{ textAlign: "center", padding: "30px 0", color: "#8A9089", fontSize: 14 }}>Aucun produit dans le catalogue.</div>
-        )}
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {produits.map((p) => {
-            const q = quantitesParProduit[p.nom] || { commandees: 0, livrees: 0 };
-            const stock = Number(p.stock_initial || 0);
-            const restant = stock - q.commandees;
-            return (
-              <div key={p.id} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "12px 14px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.nom}</div>
-                    {editId === p.id ? (
-                      <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                        <input type="number" value={editValue} onChange={(e) => setEditValue(e.target.value)} autoFocus style={{ flex: 1, padding: "6px 8px", borderRadius: 6, border: "1px solid #DDD8CC", fontSize: 13 }} />
-                        <button onClick={() => validerEdition(p.id)} style={{ background: "#1a7a3c", color: "white", border: "none", borderRadius: 6, padding: "0 10px", fontSize: 12, fontWeight: 600 }}>OK</button>
-                      </div>
-                    ) : (
-                      <button onClick={() => commencerEdition(p)} style={{ background: "none", border: "none", padding: 0, marginTop: 3, fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, color: "#6B7168", textDecoration: "underline" }}>
-                        Coût : {formatFCFA(p.cout_achat)}
-                      </button>
-                    )}
-                  </div>
-                  <button onClick={() => onDelete(p.id)} style={{ background: "none", border: "none", color: "#D64933", padding: 6, flexShrink: 0 }} aria-label="Retirer">
-                    <Trash2 size={17} />
-                  </button>
-                </div>
-
-                <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #F0EEE6" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                    <span style={{ fontSize: 11, color: "#8A9089", textTransform: "uppercase" }}>Stock acheté</span>
-                    {editStockId === p.id ? (
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <input type="number" value={editStockValue} onChange={(e) => setEditStockValue(e.target.value)} autoFocus style={{ width: 70, padding: "4px 7px", borderRadius: 6, border: "1px solid #DDD8CC", fontSize: 12.5 }} />
-                        <button onClick={() => validerEditionStock(p.id)} style={{ background: "#1a7a3c", color: "white", border: "none", borderRadius: 6, padding: "0 9px", fontSize: 11.5, fontWeight: 600 }}>OK</button>
-                      </div>
-                    ) : (
-                      <button onClick={() => commencerEditionStock(p)} style={{ background: "none", border: "none", padding: 0, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 13.5, color: "#16231F", textDecoration: "underline" }}>
-                        {stock} pièces
-                      </button>
-                    )}
-                  </div>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <div style={{ flex: 1, background: "#FBF3E3", borderRadius: 7, padding: "6px 8px", textAlign: "center" }}>
-                      <div style={{ fontSize: 9.5, color: "#8A6412" }}>Engagé</div>
-                      <div style={{ fontWeight: 700, fontSize: 13, color: "#8A6412" }}>{q.commandees}</div>
-                    </div>
-                    <div style={{ flex: 1, background: "#EAF7F1", borderRadius: 7, padding: "6px 8px", textAlign: "center" }}>
-                      <div style={{ fontSize: 9.5, color: "#1F9D6E" }}>Livré</div>
-                      <div style={{ fontWeight: 700, fontSize: 13, color: "#1F9D6E" }}>{q.livrees}</div>
-                    </div>
-                    <div style={{ flex: 1, background: restant <= 5 && stock > 0 ? "#FBEAE6" : "#EAF3DE", borderRadius: 7, padding: "6px 8px", textAlign: "center" }}>
-                      <div style={{ fontSize: 9.5, color: restant <= 5 && stock > 0 ? "#D64933" : "#3B6D11" }}>Restant</div>
-                      <div style={{ fontWeight: 700, fontSize: 13, color: restant <= 5 && stock > 0 ? "#D64933" : "#3B6D11" }}>{stock > 0 ? restant : "—"}</div>
-                    </div>
-                  </div>
-                  {stock > 0 && restant <= 5 && restant > 0 && (
-                    <div style={{ fontSize: 10.5, color: "#D64933", marginTop: 5, fontWeight: 600 }}>⚠️ Stock bientôt épuisé</div>
-                  )}
-                  {stock > 0 && restant <= 0 && (
-                    <div style={{ fontSize: 10.5, color: "#D64933", marginTop: 5, fontWeight: 600 }}>🔴 Stock épuisé — commandes en cours risquent de ne pas être honorées</div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function AddProduit({ onClose, onAdd }) {
-  const [form, setForm] = useState({ nom: "", cout_achat: "" });
-  const canSubmit = form.nom && form.cout_achat !== "";
-
-  return (
-    <div className="rv-modal-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", zIndex: 55 }} onClick={onClose}>
-      <div className="rv-modal-sheet" onClick={(e) => e.stopPropagation()} style={{ background: "#FAFAF7", width: "100%", borderRadius: "18px 18px 0 0", padding: "18px 20px 28px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 700, fontSize: 19 }}>Nouveau produit</div>
-          <button onClick={onClose} style={{ background: "none", border: "none" }}><X size={20} /></button>
-        </div>
-
-        <div style={{ marginBottom: 10 }}>
-          <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4 }}>Nom exact (comme dans tes commandes)</label>
-          <input
-            value={form.nom}
-            onChange={(e) => setForm({ ...form, nom: e.target.value })}
-            placeholder="Ex: Peineili Spray"
-            style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, background: "white" }}
-          />
-        </div>
-
-        <div style={{ marginBottom: 10 }}>
-          <label style={{ fontSize: 12, color: "#6B7168", display: "block", marginBottom: 4 }}>Coût d'achat unitaire (FCFA)</label>
-          <input
-            type="number"
-            value={form.cout_achat}
-            onChange={(e) => setForm({ ...form, cout_achat: e.target.value })}
-            placeholder="Ex: 2000"
-            style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #DDD8CC", fontSize: 14, background: "white" }}
-          />
-        </div>
-
-        <button
-          disabled={!canSubmit}
-          onClick={() => canSubmit && onAdd(form)}
-          style={{ width: "100%", marginTop: 6, padding: "13px 0", borderRadius: 10, border: "none", background: canSubmit ? "#1a7a3c" : "#DDD8CC", color: "white", fontWeight: 600, fontSize: 14.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
-        >
-          <Check size={17} /> Ajouter au catalogue
-        </button>
       </div>
     </div>
   );
