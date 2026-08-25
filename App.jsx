@@ -2691,9 +2691,10 @@ function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, clos
 
         {order.statut !== "confirmee" && order.statut !== "annulee" && (
           <button
-            onClick={() => {
+            onClick={async () => {
               if (window.confirm(`Marquer "${order.client}" comme annulée ? Elle disparaîtra des commandes actives et ne comptera plus dans le chiffre d'affaires.`)) {
-                onStatus(order.id, "annulee");
+                await onStatus(order.id, "annulee");
+                onClose();
               }
             }}
             style={{ width: "100%", background: "white", border: "1px solid #DDD8CC", color: "#8A9089", padding: "10px 0", borderRadius: 9, fontWeight: 600, fontSize: 12.5, cursor: "pointer", marginBottom: 14 }}
