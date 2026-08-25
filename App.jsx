@@ -7,6 +7,7 @@ const STATUS = {
   confirmee: { label: "Confirmée", color: "#1F9D6E", bg: "#EAF7F1" },
   en_cours: { label: "En cours", color: "#E8A93D", bg: "#FBF3E3" },
   echouee: { label: "Échouée", color: "#D64933", bg: "#FBEAE6" },
+  annulee: { label: "Annulée", color: "#8A9089", bg: "#F0EEE6" },
 };
 
 const ADMIN_EMAIL = import.meta.env.VITE_ADMIN_EMAIL || "";
@@ -316,6 +317,7 @@ export default function App() {
   const [showAddComptable, setShowAddComptable] = useState(false);
   const [showComptables, setShowComptables] = useState(false);
   const [showComptaDetail, setShowComptaDetail] = useState(false);
+  const [statsOuvertes, setStatsOuvertes] = useState(false);
   const [showProduits, setShowProduits] = useState(false);
   const [showAddProduit, setShowAddProduit] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
@@ -810,7 +812,7 @@ export default function App() {
       .map(([key, val]) => val);
   }, [filtered]);
 
-  async function updateStatus(id, statut) {
+  async function updateStatus(id, statut, modePaiement) {
     const current = orders.find((o) => o.id === id);
     if (statut === "confirmee" && current?.type_livraison === "expedition" && !current?.depot_recu) {
       showToast("⛔ Impossible de confirmer : le dépôt n'a pas encore été reçu");
@@ -819,7 +821,7 @@ export default function App() {
     const vraimentRecuperee = statut === "confirmee" && current?.statut === "echouee";
     const recupere = vraimentRecuperee ? true : current?.recupere;
     const nomValidateur = monProfilLivreur?.nom || monProfilCloser?.nom || "Admin";
-    const infosValidation = statut === "confirmee" ? { confirmed_at: new Date().toISOString(), confirmed_by: nomValidateur } : {};
+    const infosValidation = statut === "confirmee" ? { confirmed_at: new Date().toISOString(), confirmed_by: nomValidateur, mode_paiement: modePaiement || null } : {};
     const { error } = await supabase.from("commandes").update({ statut, recupere, ...infosValidation }).eq("id", id);
     if (error) {
       showToast("Erreur: " + error.message);
@@ -1845,6 +1847,20 @@ export default function App() {
         </button>
       </div>
 
+      {(clientsSuspects.length > 0 || anomaliesProduitZone.length > 0 || stats.total > 0) && (
+        <div style={{ margin: "14px 20px 0" }}>
+          <button
+            onClick={() => setStatsOuvertes(!statsOuvertes)}
+            style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "12px 16px", cursor: "pointer" }}
+          >
+            <span style={{ fontSize: 13, fontWeight: 700, color: "#16231F" }}>📊 Statistiques et alertes</span>
+            <span style={{ fontSize: 11, color: "#8A9089" }}>{statsOuvertes ? "Masquer ▲" : "Voir ▼"}</span>
+          </button>
+        </div>
+      )}
+
+      {statsOuvertes && (
+        <>
       {clientsSuspects.length > 0 && (
         <div style={{ margin: "14px 20px 0", background: "#FBEAE6", border: "1px solid #F0B8AC", borderRadius: 12, padding: "12px 14px" }}>
           <div style={{ fontSize: 12.5, fontWeight: 700, color: "#D64933", marginBottom: 6 }}>⚠️ {clientsSuspects.length} client{clientsSuspects.length > 1 ? "s" : ""} avec 3+ échecs</div>
@@ -1958,6 +1974,8 @@ export default function App() {
             ))}
           </div>
         </div>
+      )}
+        </>
       )}
 
       <div style={{ display: "flex", gap: 8, padding: "14px 20px 0" }}>
@@ -2113,6 +2131,7 @@ export default function App() {
             todo={todoAujourdhui}
             onSelectOrder={(o) => { setView("dashboard"); setSelected(o); }}
             onRelancerTout={() => setShowBatch(true)}
+            onStatus={updateStatus}
             clientsARelancer={clientsARelancer}
             monProfilCloser={monProfilCloser}
             commandesNonAssigneesListe={monProfilCloser ? orders.filter((o) => !o.closer && (o.statut === "en_cours" || o.statut === "echouee")) : []}
@@ -2670,43 +2689,21 @@ function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, clos
           📞 Enregistrer un appel
         </button>
 
+        {order.statut !== "confirmee" && order.statut !== "annulee" && (
+          <button
+            onClick={() => {
+              if (window.confirm(`Marquer "${order.client}" comme annulée ? Elle disparaîtra des commandes actives et ne comptera plus dans le chiffre d'affaires.`)) {
+                onStatus(order.id, "annulee");
+              }
+            }}
+            style={{ width: "100%", background: "white", border: "1px solid #DDD8CC", color: "#8A9089", padding: "10px 0", borderRadius: 9, fontWeight: 600, fontSize: 12.5, cursor: "pointer", marginBottom: 14 }}
+          >
+            🚫 Marquer comme annulée (ex: annulée sur Shopify)
+          </button>
+        )}
+
         <JournalAppelsPrincipal orderId={order.id} />
         <RelancesHistorique key={`${order.id}-${order.statut}-${order.livreur}-${order.closer}-${order.date_relivraison}`} orderId={order.id} onAdded={onRelanceAdded} />
-
-        {showAppel && (
-          <div
-            onClick={() => setShowAppel(false)}
-            style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 60 }}
-          >
-            <div onClick={(e) => e.stopPropagation()} style={{ background: "white", width: "100%", maxWidth: 420, borderRadius: "18px 18px 0 0", padding: "20px 18px 28px" }}>
-              <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>Comment s'est passé l'appel ?</div>
-              <div style={{ fontSize: 12.5, color: "#8A9089", marginBottom: 16 }}>{order.client} — {order.tel}</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {[
-                  { key: "confirme_telephone", label: "✅ Confirmé par téléphone", couleur: "#1F9D6E" },
-                  { key: "pas_de_reponse", label: "📵 Pas de réponse", couleur: "#8A6412" },
-                  { key: "rappeler_plus_tard", label: "🕒 Rappeler plus tard", couleur: "#8A6412" },
-                  { key: "faux_numero", label: "🚫 Faux numéro", couleur: "#D64933" },
-                  { key: "refuse", label: "❌ Refusé par le client", couleur: "#D64933" },
-                ].map((motif) => (
-                  <button
-                    key={motif.key}
-                    onClick={async () => {
-                      await supabase.from("appels_commande").insert([{ commande_id: order.id, motif: motif.key }]);
-                      setShowAppel(false);
-                    }}
-                    style={{ background: "#FAFAF7", border: "1px solid #ECE8DC", borderRadius: 10, padding: "13px 16px", textAlign: "left", fontWeight: 600, fontSize: 14, cursor: "pointer", color: motif.couleur }}
-                  >
-                    {motif.label}
-                  </button>
-                ))}
-              </div>
-              <button onClick={() => setShowAppel(false)} style={{ width: "100%", marginTop: 10, background: "none", border: "none", color: "#8A9089", fontSize: 13, padding: "8px 0", cursor: "pointer" }}>
-                Annuler
-              </button>
-            </div>
-          </div>
-        )}
 
         <div style={{ background: "#EAF7F1", border: "1px solid #CFEBDD", borderRadius: 12, padding: 14, marginBottom: 14 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#1F9D6E", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>
@@ -2766,6 +2763,41 @@ function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, clos
           </a>
         </div>
       </div>
+
+      {showAppel && (
+        <div
+          onClick={() => setShowAppel(false)}
+          style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 70 }}
+        >
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "white", width: "100%", maxWidth: 420, borderRadius: "18px 18px 0 0", padding: "20px 18px 28px" }}>
+            <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>Comment s'est passé l'appel ?</div>
+            <div style={{ fontSize: 12.5, color: "#8A9089", marginBottom: 16 }}>{order.client} — {order.tel}</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {[
+                { key: "confirme_telephone", label: "✅ Confirmé par téléphone", couleur: "#1F9D6E" },
+                { key: "pas_de_reponse", label: "📵 Pas de réponse", couleur: "#8A6412" },
+                { key: "rappeler_plus_tard", label: "🕒 Rappeler plus tard", couleur: "#8A6412" },
+                { key: "faux_numero", label: "🚫 Faux numéro", couleur: "#D64933" },
+                { key: "refuse", label: "❌ Refusé par le client", couleur: "#D64933" },
+              ].map((motif) => (
+                <button
+                  key={motif.key}
+                  onClick={async () => {
+                    await supabase.from("appels_commande").insert([{ commande_id: order.id, motif: motif.key }]);
+                    setShowAppel(false);
+                  }}
+                  style={{ background: "#FAFAF7", border: "1px solid #ECE8DC", borderRadius: 10, padding: "13px 16px", textAlign: "left", fontWeight: 600, fontSize: 14, cursor: "pointer", color: motif.couleur }}
+                >
+                  {motif.label}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setShowAppel(false)} style={{ width: "100%", marginTop: 10, background: "none", border: "none", color: "#8A9089", fontSize: 13, padding: "8px 0", cursor: "pointer" }}>
+              Annuler
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2875,31 +2907,48 @@ function ClientsView({ clients, onSelect }) {
 
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {clients.map((c, i) => (
-          <button
-            key={i}
-            onClick={() => onSelect(c)}
-            style={{ textAlign: "left", background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}
-          >
-            <div>
-              <div style={{ fontWeight: 600, fontSize: 15, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                {i < 3 && c.montantTotal > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: "#e8920a", background: "#FBF3E3", padding: "1px 7px", borderRadius: 999 }}>🏆 TOP CLIENT</span>}
-                {c.joursDeRetard !== null && c.joursDeRetard >= 0 && <span style={{ fontSize: 10, fontWeight: 700, color: "#1a7a3c", background: "#EAF3DE", padding: "1px 7px", borderRadius: 999 }}>🔄 À relancer</span>}
-                {c.nom}
+          <div key={i} style={{ background: "white", border: "1px solid #ECE8DC", borderRadius: 12, padding: "14px 16px" }}>
+            <button
+              onClick={() => onSelect(c)}
+              style={{ width: "100%", textAlign: "left", background: "none", border: "none", padding: 0, display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 15, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                  {i < 3 && c.montantTotal > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: "#e8920a", background: "#FBF3E3", padding: "1px 7px", borderRadius: 999 }}>🏆 TOP CLIENT</span>}
+                  {c.joursDeRetard !== null && c.joursDeRetard >= 0 && <span style={{ fontSize: 10, fontWeight: 700, color: "#1a7a3c", background: "#EAF3DE", padding: "1px 7px", borderRadius: 999 }}>🔄 À relancer</span>}
+                  {c.nom}
+                </div>
+                <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{c.tel} · {c.zone}</div>
+                {c.produitPrefere && (
+                  <div style={{ fontSize: 11.5, color: "#8A9089", marginTop: 3 }}>Préfère : {c.produitPrefere}</div>
+                )}
+                <div style={{ fontSize: 12, marginTop: 5, display: "flex", gap: 10 }}>
+                  <span style={{ color: "#1a7a3c" }}>{c.confirmees} livrée{c.confirmees > 1 ? "s" : ""}</span>
+                  {c.echouees > 0 && <span style={{ color: "#D64933" }}>{c.echouees} échouée{c.echouees > 1 ? "s" : ""}</span>}
+                </div>
               </div>
-              <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{c.tel} · {c.zone}</div>
-              {c.produitPrefere && (
-                <div style={{ fontSize: 11.5, color: "#8A9089", marginTop: 3 }}>Préfère : {c.produitPrefere}</div>
-              )}
-              <div style={{ fontSize: 12, marginTop: 5, display: "flex", gap: 10 }}>
-                <span style={{ color: "#1a7a3c" }}>{c.confirmees} livrée{c.confirmees > 1 ? "s" : ""}</span>
-                {c.echouees > 0 && <span style={{ color: "#D64933" }}>{c.echouees} échouée{c.echouees > 1 ? "s" : ""}</span>}
+              <div style={{ textAlign: "right", flexShrink: 0 }}>
+                <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 15, color: "#1a7a3c" }}>{formatFCFA(c.montantTotal)}</div>
+                <div style={{ fontSize: 10.5, color: "#8A9089" }}>{c.total} commande{c.total > 1 ? "s" : ""}</div>
               </div>
+            </button>
+            <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+              <a
+                href={`tel:${c.tel}`}
+                style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: 1, background: "#FAFAF7", border: "1px solid #ECE8DC", color: "#16231F", borderRadius: 7, padding: "8px 0", fontSize: 12.5, fontWeight: 600, textDecoration: "none" }}
+              >
+                📞 Appeler
+              </a>
+              <a
+                href={`https://wa.me/${cleanPhoneForWhatsApp(c.tel)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: 1, background: "#EAF3DE", border: "1px solid #C7DDA3", color: "#3B6D11", borderRadius: 7, padding: "8px 0", fontSize: 12.5, fontWeight: 600, textDecoration: "none" }}
+              >
+                💬 WhatsApp
+              </a>
             </div>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 15, color: "#1a7a3c" }}>{formatFCFA(c.montantTotal)}</div>
-              <div style={{ fontSize: 10.5, color: "#8A9089" }}>{c.total} commande{c.total > 1 ? "s" : ""}</div>
-            </div>
-          </button>
+          </div>
         ))}
       </div>
     </div>
@@ -3529,7 +3578,8 @@ function RelancesHistorique({ orderId, onAdded }) {
   );
 }
 
-function TodayView({ todo, onSelectOrder, onRelancerTout, clientsARelancer = [], monProfilCloser, commandesNonAssigneesListe = [], onSeAttribuer, enAttenteDepot = [] }) {
+function TodayView({ todo, onSelectOrder, onRelancerTout, onStatus, clientsARelancer = [], monProfilCloser, commandesNonAssigneesListe = [], onSeAttribuer, enAttenteDepot = [] }) {
+  const [commandeAConfirmerRapide, setCommandeAConfirmerRapide] = useState(null);
   const sections = [
     { key: "aRelivrer", title: "📅 À relivrer aujourd'hui", items: todo.aRelivrer, color: "#1a7a3c", bg: "#EAF3DE" },
     { key: "jamaisContactees", title: "🆕 Jamais contactées", items: todo.jamaisContactees, color: "#8A6412", bg: "#FBF3E3" },
@@ -3635,23 +3685,46 @@ function TodayView({ todo, onSelectOrder, onRelancerTout, clientsARelancer = [],
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {sec.items.map((o, oi) => (
-                <button
-                  key={o.id}
-                  onClick={() => onSelectOrder(o)}
-                  style={{ textAlign: "left", background: "white", border: "1px solid #ECE8DC", borderLeft: `4px solid ${sec.color}`, borderRadius: 10, padding: "12px 14px", display: "flex", alignItems: "center", gap: 10 }}
-                >
-                  <div style={{ width: 22, height: 22, borderRadius: "50%", background: oi === 0 ? sec.color : "#ECE8DC", color: oi === 0 ? "white" : "#8A9089", fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                    {oi + 1}
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 600, fontSize: 14.5, display: "flex", alignItems: "center", gap: 6 }}>
-                      {o.client}
-                      {oi === 0 && <span style={{ fontSize: 10, fontWeight: 700, color: sec.color, background: sec.bg, padding: "1px 7px", borderRadius: 999 }}>🔥 PRIORITÉ</span>}
+                <div key={o.id} style={{ background: "white", border: "1px solid #ECE8DC", borderLeft: `4px solid ${sec.color}`, borderRadius: 10, padding: "12px 14px" }}>
+                  <button
+                    onClick={() => onSelectOrder(o)}
+                    style={{ width: "100%", textAlign: "left", background: "none", border: "none", padding: 0, display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}
+                  >
+                    <div style={{ width: 22, height: 22, borderRadius: "50%", background: oi === 0 ? sec.color : "#ECE8DC", color: oi === 0 ? "white" : "#8A9089", fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      {oi + 1}
                     </div>
-                    <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2 }}>{o.produit} · {o.tel}</div>
-                  </div>
-                  <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 14.5, flexShrink: 0 }}>{formatFCFA(o.montant)}</div>
-                </button>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: 14.5, display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.client}</span>
+                        {oi === 0 && <span style={{ fontSize: 10, fontWeight: 700, color: sec.color, background: sec.bg, padding: "1px 7px", borderRadius: 999, flexShrink: 0 }}>🔥 PRIORITÉ</span>}
+                      </div>
+                      <div style={{ fontSize: 12.5, color: "#6B7168", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.produit} · {o.tel}</div>
+                    </div>
+                    <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 14.5, flexShrink: 0 }}>{formatFCFA(o.montant)}</div>
+                  </button>
+                  {onStatus && (
+                    <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+                      <a
+                        href={`tel:${o.tel}`}
+                        style={{ display: "flex", alignItems: "center", justifyContent: "center", background: "white", border: "1px solid #DDD8CC", color: "#16231F", borderRadius: 7, padding: "9px 14px", fontSize: 15, textDecoration: "none" }}
+                      >
+                        📞
+                      </a>
+                      <button
+                        onClick={() => setCommandeAConfirmerRapide(o)}
+                        style={{ flex: 1, background: "#1F9D6E", color: "white", border: "none", borderRadius: 7, padding: "9px 0", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}
+                      >
+                        ✅ Confirmer
+                      </button>
+                      <button
+                        onClick={() => onStatus(o.id, "echouee")}
+                        style={{ flex: 1, background: "#D64933", color: "white", border: "none", borderRadius: 7, padding: "9px 0", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}
+                      >
+                        ❌ Échoué
+                      </button>
+                    </div>
+                  )}
+                </div>
               ))}
             </div>
           </div>
@@ -3689,6 +3762,38 @@ function TodayView({ todo, onSelectOrder, onRelancerTout, clientsARelancer = [],
                 </div>
               </a>
             ))}
+          </div>
+        </div>
+      )}
+
+      {commandeAConfirmerRapide && (
+        <div
+          onClick={() => setCommandeAConfirmerRapide(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(22,35,31,0.5)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 90 }}
+        >
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "white", width: "100%", maxWidth: 420, borderRadius: "18px 18px 0 0", padding: "20px 18px 28px" }}>
+            <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>Comment le client a-t-il payé ?</div>
+            <div style={{ fontSize: 12.5, color: "#8A9089", marginBottom: 16 }}>{commandeAConfirmerRapide.client} — {formatFCFA(commandeAConfirmerRapide.montant)}</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {[
+                { key: "cash", label: "💵 Cash (espèces)" },
+                { key: "orange_money", label: "🟠 Orange Money" },
+                { key: "wave", label: "🌊 Wave" },
+                { key: "mtn_money", label: "🟡 MTN Money" },
+                { key: "moov_money", label: "🔵 Moov Money" },
+              ].map((mode) => (
+                <button
+                  key={mode.key}
+                  onClick={() => { onStatus(commandeAConfirmerRapide.id, "confirmee", mode.key); setCommandeAConfirmerRapide(null); }}
+                  style={{ background: "#FAFAF7", border: "1px solid #ECE8DC", borderRadius: 10, padding: "13px 16px", textAlign: "left", fontWeight: 600, fontSize: 14, cursor: "pointer" }}
+                >
+                  {mode.label}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setCommandeAConfirmerRapide(null)} style={{ width: "100%", marginTop: 10, background: "none", border: "none", color: "#8A9089", fontSize: 13, padding: "8px 0", cursor: "pointer" }}>
+              Annuler
+            </button>
           </div>
         </div>
       )}
@@ -5076,7 +5181,7 @@ function CloserPortal({ closer, orders, relanceCountByOrder, onStatus, onResched
         <OrderDetail
           order={selected}
           onClose={() => setSelected(null)}
-          onStatus={(id, statut) => { onStatus(id, statut); setSelected(null); }}
+          onStatus={(id, statut, modePaiement) => { onStatus(id, statut, modePaiement); setSelected(null); }}
           onReschedule={onReschedule}
           onRelanceAdded={onRelanceAdded}
           onMarquerDepot={onMarquerDepot}
