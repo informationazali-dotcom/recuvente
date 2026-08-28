@@ -813,20 +813,41 @@ export default function App() {
   }, [filtered]);
 
   async function updateStatus(id, statut, modePaiement) {
-    const current = orders.find((o) => o.id === id);
-    if (statut === "confirmee" && current?.type_livraison === "expedition" && !current?.depot_recu) {
-      showToast("⛔ Impossible de confirmer : le dépôt n'a pas encore été reçu");
-      return;
-    }
-    const vraimentRecuperee = statut === "confirmee" && current?.statut === "echouee";
-    const recupere = vraimentRecuperee ? true : current?.recupere;
-    const nomValidateur = monProfilLivreur?.nom || monProfilCloser?.nom || "Admin";
-    const infosValidation = statut === "confirmee" ? { confirmed_at: new Date().toISOString(), confirmed_by: nomValidateur, mode_paiement: modePaiement || null } : {};
-    const { error } = await supabase.from("commandes").update({ statut, recupere, ...infosValidation }).eq("id", id);
-    if (error) {
-      showToast("Erreur: " + error.message);
-      return;
-    }
+    try {
+      const current = orders.find((o) => o.id === id);
+      if (!current) {
+        showToast("❌ Commande introuvable. Actualise la page.");
+        return false;
+      }
+      if (statut === "confirmee" && current?.type_livraison === "expedition" && !current?.depot_recu) {
+        showToast("⛔ Impossible de confirmer : le dépôt n'a pas encore été reçu");
+        return false;
+      }
+      const vraimentRecuperee = statut === "confirmee" && current?.statut === "echouee";
+      const recupere = vraimentRecuperee ? true : current?.recupere;
+      const nomValidateur = monProfilLivreur?.nom || monProfilCloser?.nom || "Admin";
+      const infosValidation = statut === "confirmee"
+        ? { confirmed_at: new Date().toISOString(), confirmed_by: nomValidateur, mode_paiement: modePaiement || null }
+        : {};
+
+      // .select() est volontaire : il permet de vérifier qu'une ligne a réellement été modifiée.
+      // Avec une policy RLS qui bloque l'UPDATE, Supabase peut sinon ne rien modifier sans erreur claire.
+      const { data: updatedRows, error } = await supabase
+        .from("commandes")
+        .update({ statut, recupere, ...infosValidation })
+        .eq("id", id)
+        .select("id, statut, recupere, confirmed_at, confirmed_by, mode_paiement");
+
+      if (error) {
+        console.error("Erreur update statut commande:", error);
+        showToast("❌ Impossible d'enregistrer : " + error.message);
+        return false;
+      }
+      if (!updatedRows || updatedRows.length === 0) {
+        console.error("UPDATE refusé ou aucune ligne modifiée", { id, statut });
+        showToast("❌ La commande n'a pas été modifiée. Vérifie les droits Supabase du closer.");
+        return false;
+      }
     if (statut === "confirmee") {
       supabase.auth.getSession().then(({ data: sessionData }) => {
         fetch("/api/facebook-capi", {
@@ -846,7 +867,13 @@ export default function App() {
       playCelebrationSound();
       setTimeout(() => setCelebration(null), 2600);
     } else {
-      showToast("Statut mis à jour");
+      showToast("✅ Statut mis à jour");
+    }
+    return true;
+    } catch (e) {
+      console.error("Exception updateStatus:", e);
+      showToast("❌ Erreur inattendue : " + (e?.message || "réessaie"));
+      return false;
     }
   }
 
@@ -1051,15 +1078,35 @@ export default function App() {
   }
 
   async function updateOrderInfos(orderId, infos) {
-    const { error } = await supabase.from("commandes").update(infos).eq("id", orderId);
-    if (error) {
-      showToast("Erreur: " + error.message);
-      return;
+    try {
+      if (infos.montant !== undefined && (!Number.isFinite(Number(infos.montant)) || Number(infos.montant) < 0)) {
+        showToast("❌ Le montant saisi est invalide.");
+        return false;
+      }
+      const { data: updatedRows, error } = await supabase
+        .from("commandes")
+        .update(infos)
+        .eq("id", orderId)
+        .select("id");
+      if (error) {
+        console.error("Erreur modification commande:", error);
+        showToast("❌ Impossible d'enregistrer : " + error.message);
+        return false;
+      }
+      if (!updatedRows || updatedRows.length === 0) {
+        showToast("❌ Modification refusée. Vérifie les droits Supabase du closer.");
+        return false;
+      }
+      await loadOrders();
+      if (selected && selected.id === orderId) setSelected((s) => ({ ...s, ...infos }));
+      logEvent(orderId, `✏️ Informations modifiées`);
+      showToast("✅ Commande mise à jour");
+      return true;
+    } catch (e) {
+      console.error("Exception modification commande:", e);
+      showToast("❌ Erreur inattendue : " + (e?.message || "réessaie"));
+      return false;
     }
-    await loadOrders();
-    if (selected && selected.id === orderId) setSelected((s) => ({ ...s, ...infos }));
-    logEvent(orderId, `✏️ Informations modifiées`);
-    showToast("Commande mise à jour");
   }
 
   async function marquerDepot(orderId, montant) {
@@ -2423,11 +2470,13 @@ function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, clos
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ client: order.client, tel: order.tel, zone: order.zone, produit: order.produit, montant: order.montant, type_livraison: order.type_livraison || "abidjan", frais_expedition: order.frais_expedition, montant_depot: order.montant_depot, depot_recu: order.depot_recu });
   const [saving, setSaving] = useState(false);
+  const [savingStatus, setSavingStatus] = useState(false);
   const [showAppel, setShowAppel] = useState(false);
 
   async function enregistrer() {
+    if (saving) return;
     setSaving(true);
-    await onUpdateInfos(order.id, {
+    const ok = await onUpdateInfos(order.id, {
       client: form.client,
       tel: form.tel,
       zone: form.zone,
@@ -2439,7 +2488,17 @@ function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, clos
       depot_recu: !!form.depot_recu,
     });
     setSaving(false);
-    setEditing(false);
+    if (ok) setEditing(false);
+  }
+
+  async function changerStatut(statut, modePaiement) {
+    if (savingStatus) return;
+    setSavingStatus(true);
+    try {
+      await onStatus(order.id, statut, modePaiement);
+    } finally {
+      setSavingStatus(false);
+    }
   }
 
   return (
@@ -2642,8 +2701,8 @@ function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, clos
               return (
                 <button
                   key={key}
-                  onClick={() => !bloqueDepot && onStatus(order.id, key)}
-                  disabled={bloqueDepot}
+                  onClick={() => !bloqueDepot && changerStatut(key)}
+                  disabled={bloqueDepot || savingStatus}
                   title={bloqueDepot ? "Le dépôt doit être reçu avant de confirmer" : undefined}
                   style={{
                     flex: 1,
@@ -5183,7 +5242,11 @@ function CloserPortal({ closer, orders, relanceCountByOrder, onStatus, onResched
         <OrderDetail
           order={selected}
           onClose={() => setSelected(null)}
-          onStatus={(id, statut, modePaiement) => { onStatus(id, statut, modePaiement); setSelected(null); }}
+          onStatus={async (id, statut, modePaiement) => {
+            const ok = await onStatus(id, statut, modePaiement);
+            if (ok) setSelected(null);
+            return ok;
+          }}
           onReschedule={onReschedule}
           onRelanceAdded={onRelanceAdded}
           onMarquerDepot={onMarquerDepot}
