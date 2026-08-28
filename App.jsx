@@ -74,9 +74,7 @@ function ResumeMultiPeriodes({ orders, livreurs, dark }) {
   ];
   const lignes = presets.map((p) => ({ ...p, ...calculerDepotPeriode(orders, livreurs, p.key) }));
 
-  
-    {/* La confirmation commerciale est volontairement indépendante de la logistique. */}
-return (
+  return (
     <div style={{ background: dark ? "white" : "white", border: "1px solid #ECE8DC", borderRadius: 14, padding: "16px 18px", marginBottom: 16 }}>
       <div style={{ fontSize: 11, color: "#8A9089", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 12 }}>
         🏦 Récapitulatif des dépôts — vue d'ensemble
@@ -815,49 +813,52 @@ export default function App() {
   }, [filtered]);
 
   async function updateStatus(id, statut, modePaiement) {
-    const current = orders.find((o) => o.id === id);
-    if (!current) {
-      showToast("❌ Commande introuvable. Actualise la page.");
-      return false;
-    }
-    if (statut === "confirmee" && current?.type_livraison === "expedition" && !current?.depot_recu) {
-      showToast("⛔ Impossible de confirmer : le dépôt n'a pas encore été reçu");
-      return false;
-    }
-    const vraimentRecuperee = statut === "confirmee" && current?.statut === "echouee";
-    const recupere = vraimentRecuperee ? true : current?.recupere;
-    const nomValidateur = monProfilLivreur?.nom || monProfilCloser?.nom || "Admin";
-    const infosValidation = statut === "confirmee"
-      ? { confirmed_at: new Date().toISOString(), confirmed_by: nomValidateur, mode_paiement: modePaiement || null }
-      : {};
+    try {
+      const current = orders.find((o) => o.id === id);
+      if (!current) {
+        showToast("❌ Commande introuvable. Actualise la page.");
+        return false;
+      }
+      if (statut === "confirmee" && current?.type_livraison === "expedition" && !current?.depot_recu) {
+        showToast("⛔ Impossible de confirmer : le dépôt n'a pas encore été reçu");
+        return false;
+      }
+      const vraimentRecuperee = statut === "confirmee" && current?.statut === "echouee";
+      const recupere = vraimentRecuperee ? true : current?.recupere;
+      const nomValidateur = monProfilLivreur?.nom || monProfilCloser?.nom || "Admin";
+      const infosValidation = statut === "confirmee"
+        ? { confirmed_at: new Date().toISOString(), confirmed_by: nomValidateur, mode_paiement: modePaiement || null }
+        : {};
 
-    const payload = { statut, recupere, ...infosValidation };
-    const { data: updatedRows, error } = await supabase
-      .from("commandes")
-      .update(payload)
-      .eq("id", id)
-      .select("id, statut, confirmed_at, confirmed_by, mode_paiement, recupere");
+      // .select() est volontaire : il permet de vérifier qu'une ligne a réellement été modifiée.
+      // Avec une policy RLS qui bloque l'UPDATE, Supabase peut sinon ne rien modifier sans erreur claire.
+      const { data: updatedRows, error } = await supabase
+        .from("commandes")
+        .update({ statut, recupere, ...infosValidation })
+        .eq("id", id)
+        .select("id, statut, recupere, confirmed_at, confirmed_by, mode_paiement");
 
-    if (error) {
-      showToast("❌ Échec de l'enregistrement : " + error.message);
-      return false;
-    }
-    if (!updatedRows || updatedRows.length === 0) {
-      showToast("❌ Modification refusée par la base. Vérifie les droits du closer dans Supabase.");
-      return false;
-    }
-
+      if (error) {
+        console.error("Erreur update statut commande:", error);
+        showToast("❌ Impossible d'enregistrer : " + error.message);
+        return false;
+      }
+      if (!updatedRows || updatedRows.length === 0) {
+        console.error("UPDATE refusé ou aucune ligne modifiée", { id, statut });
+        showToast("❌ La commande n'a pas été modifiée. Vérifie les droits Supabase du closer.");
+        return false;
+      }
     if (statut === "confirmee") {
       supabase.auth.getSession().then(({ data: sessionData }) => {
         fetch("/api/facebook-capi", {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionData.session?.access_token}` },
           body: JSON.stringify({ commandeId: id }),
-        }).catch(() => {});
+        }).catch(() => {}); // silencieux — ne bloque jamais la confirmation si Facebook échoue
       });
     }
     await loadOrders();
-    if (selected && selected.id === id) setSelected((s) => ({ ...s, ...payload }));
+    if (selected && selected.id === id) setSelected((s) => ({ ...s, statut, ...infosValidation }));
     if (current && current.statut !== statut) {
       logEvent(id, `📋 Statut : ${STATUS[current.statut]?.label || current.statut} → ${STATUS[statut]?.label || statut}${statut === "confirmee" ? ` par ${nomValidateur}` : ""}`);
     }
@@ -866,9 +867,14 @@ export default function App() {
       playCelebrationSound();
       setTimeout(() => setCelebration(null), 2600);
     } else {
-      showToast(statut === "confirmee" ? "✅ Commande confirmée et enregistrée" : "✅ Statut mis à jour");
+      showToast("✅ Statut mis à jour");
     }
     return true;
+    } catch (e) {
+      console.error("Exception updateStatus:", e);
+      showToast("❌ Erreur inattendue : " + (e?.message || "réessaie"));
+      return false;
+    }
   }
 
   async function addOrder(order) {
@@ -1072,36 +1078,35 @@ export default function App() {
   }
 
   async function updateOrderInfos(orderId, infos) {
-    const cleanInfos = { ...infos };
-    if (Object.prototype.hasOwnProperty.call(cleanInfos, "montant")) {
-      const montant = Number(cleanInfos.montant);
-      if (!Number.isFinite(montant) || montant <= 0) {
-        showToast("❌ Le montant doit être supérieur à 0 FCFA");
+    try {
+      if (infos.montant !== undefined && (!Number.isFinite(Number(infos.montant)) || Number(infos.montant) < 0)) {
+        showToast("❌ Le montant saisi est invalide.");
         return false;
       }
-      cleanInfos.montant = montant;
-    }
-    if (Object.prototype.hasOwnProperty.call(cleanInfos, "frais_expedition")) cleanInfos.frais_expedition = Number(cleanInfos.frais_expedition) || 0;
-    if (Object.prototype.hasOwnProperty.call(cleanInfos, "montant_depot")) cleanInfos.montant_depot = Number(cleanInfos.montant_depot) || 0;
-
-    const { data: updatedRows, error } = await supabase
-      .from("commandes")
-      .update(cleanInfos)
-      .eq("id", orderId)
-      .select("id");
-    if (error) {
-      showToast("❌ Échec de la modification : " + error.message);
+      const { data: updatedRows, error } = await supabase
+        .from("commandes")
+        .update(infos)
+        .eq("id", orderId)
+        .select("id");
+      if (error) {
+        console.error("Erreur modification commande:", error);
+        showToast("❌ Impossible d'enregistrer : " + error.message);
+        return false;
+      }
+      if (!updatedRows || updatedRows.length === 0) {
+        showToast("❌ Modification refusée. Vérifie les droits Supabase du closer.");
+        return false;
+      }
+      await loadOrders();
+      if (selected && selected.id === orderId) setSelected((s) => ({ ...s, ...infos }));
+      logEvent(orderId, `✏️ Informations modifiées`);
+      showToast("✅ Commande mise à jour");
+      return true;
+    } catch (e) {
+      console.error("Exception modification commande:", e);
+      showToast("❌ Erreur inattendue : " + (e?.message || "réessaie"));
       return false;
     }
-    if (!updatedRows || updatedRows.length === 0) {
-      showToast("❌ Modification refusée par la base. Vérifie les droits du closer dans Supabase.");
-      return false;
-    }
-    await loadOrders();
-    if (selected && selected.id === orderId) setSelected((s) => ({ ...s, ...cleanInfos }));
-    logEvent(orderId, `✏️ Informations modifiées${Object.prototype.hasOwnProperty.call(cleanInfos, "montant") ? ` — montant : ${formatFCFA(cleanInfos.montant)}` : ""}`);
-    showToast("✅ Commande mise à jour");
-    return true;
   }
 
   async function marquerDepot(orderId, montant) {
@@ -1388,26 +1393,6 @@ export default function App() {
   const monProfilCloser = closers.find((c) => c.email && c.email.toLowerCase() === session.user.email.toLowerCase());
 
   const monProfilComptable = comptables.find((c) => c.email && c.email.toLowerCase() === session.user.email.toLowerCase());
-
-  if (monProfilCloser && !error) {
-    const commandesCloser = orders.filter((o) =>
-      o.closer === monProfilCloser.nom ||
-      (!o.closer && (o.statut === "en_cours" || o.statut === "echouee"))
-    );
-    return (
-      <CloserPortal
-        closer={monProfilCloser}
-        orders={commandesCloser}
-        relanceCountByOrder={relanceCountByOrder}
-        onStatus={updateStatus}
-        onReschedule={rescheduleOrder}
-        onRelanceAdded={loadRelances}
-        onUpdateInfos={updateOrderInfos}
-        onMarquerDepot={marquerDepot}
-        toast={toast}
-      />
-    );
-  }
 
   if (monProfilComptable && !error) {
     return (
@@ -2485,25 +2470,18 @@ function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, clos
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ client: order.client, tel: order.tel, zone: order.zone, produit: order.produit, montant: order.montant, type_livraison: order.type_livraison || "abidjan", frais_expedition: order.frais_expedition, montant_depot: order.montant_depot, depot_recu: order.depot_recu });
   const [saving, setSaving] = useState(false);
+  const [savingStatus, setSavingStatus] = useState(false);
   const [showAppel, setShowAppel] = useState(false);
 
   async function enregistrer() {
-    const montant = Number(form.montant);
-    if (!form.client?.trim() || !form.tel?.trim() || !form.produit?.trim()) {
-      alert("Renseigne le client, le téléphone et le produit avant d'enregistrer.");
-      return;
-    }
-    if (!Number.isFinite(montant) || montant <= 0) {
-      alert("Le montant doit être supérieur à 0 FCFA.");
-      return;
-    }
+    if (saving) return;
     setSaving(true);
     const ok = await onUpdateInfos(order.id, {
-      client: form.client.trim(),
-      tel: form.tel.trim(),
-      zone: form.zone?.trim() || "",
-      produit: form.produit.trim(),
-      montant,
+      client: form.client,
+      tel: form.tel,
+      zone: form.zone,
+      produit: form.produit,
+      montant: Number(form.montant),
       type_livraison: form.type_livraison || "abidjan",
       frais_expedition: Number(form.frais_expedition) || 0,
       montant_depot: Number(form.montant_depot) || 0,
@@ -2511,6 +2489,16 @@ function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, clos
     });
     setSaving(false);
     if (ok) setEditing(false);
+  }
+
+  async function changerStatut(statut, modePaiement) {
+    if (savingStatus) return;
+    setSavingStatus(true);
+    try {
+      await onStatus(order.id, statut, modePaiement);
+    } finally {
+      setSavingStatus(false);
+    }
   }
 
   return (
@@ -2713,8 +2701,8 @@ function OrderDetail({ order, onClose, onStatus, livreurs, onAssignLivreur, clos
               return (
                 <button
                   key={key}
-                  onClick={() => !bloqueDepot && onStatus(order.id, key)}
-                  disabled={bloqueDepot}
+                  onClick={() => !bloqueDepot && changerStatut(key)}
+                  disabled={bloqueDepot || savingStatus}
                   title={bloqueDepot ? "Le dépôt doit être reçu avant de confirmer" : undefined}
                   style={{
                     flex: 1,
@@ -5060,7 +5048,7 @@ function LivreurPortal({ livreur, orders, onStatus, toast }) {
   );
 }
 
-function CloserPortal({ closer, orders, relanceCountByOrder, onStatus, onReschedule, onRelanceAdded, onUpdateInfos, toast, onMarquerDepot }) {
+function CloserPortal({ closer, orders, relanceCountByOrder, onStatus, onReschedule, onRelanceAdded, toast, onMarquerDepot }) {
   const [selected, setSelected] = useState(null);
 
   const todo = useMemo(() => {
@@ -5261,11 +5249,6 @@ function CloserPortal({ closer, orders, relanceCountByOrder, onStatus, onResched
           }}
           onReschedule={onReschedule}
           onRelanceAdded={onRelanceAdded}
-          onUpdateInfos={async (id, infos) => {
-            const ok = await onUpdateInfos(id, infos);
-            if (ok) setSelected((current) => current && current.id === id ? { ...current, ...infos } : current);
-            return ok;
-          }}
           onMarquerDepot={onMarquerDepot}
         />
       )}
