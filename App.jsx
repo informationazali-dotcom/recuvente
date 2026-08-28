@@ -4535,6 +4535,7 @@ function LivreurPortal({ livreur, orders, onStatus, toast }) {
   const [datePreset, setDatePreset] = useState("toutes");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
+  const [commandeAConfirmer, setCommandeAConfirmer] = useState(null);
 
   const dateRange = useMemo(() => {
     const now = new Date();
